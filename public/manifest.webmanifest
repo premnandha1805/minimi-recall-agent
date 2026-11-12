@@ -1,0 +1,23 @@
+{
+  "name": "Recall Agent",
+  "short_name": "Recall",
+  "description": "Temporal, evidence-grounded conversational assistant.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAFAF8",
+  "theme_color": "#355F73",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icons/favicon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/apple-touch-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png"
+    }
+  ]
+}

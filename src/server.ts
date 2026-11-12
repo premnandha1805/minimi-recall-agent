@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import type { Writable } from 'node:stream';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { ZodError } from 'zod';
@@ -12,6 +14,52 @@ import {
   type HealthResponse,
   type ValidationErrorDetail,
 } from './contracts.js';
+
+const PUBLIC_DIR = resolve(import.meta.dirname, '..', 'public');
+
+interface StaticAssetEntry {
+  file: string;
+  contentType: string;
+  cacheControl: string;
+}
+
+const STATIC_ASSETS: Record<string, StaticAssetEntry> = {
+  '/': {
+    file: 'index.html',
+    contentType: 'text/html; charset=utf-8',
+    cacheControl: 'no-cache',
+  },
+  '/styles.css': {
+    file: 'styles.css',
+    contentType: 'text/css; charset=utf-8',
+    cacheControl: 'no-cache',
+  },
+  '/api.js': {
+    file: 'api.js',
+    contentType: 'application/javascript; charset=utf-8',
+    cacheControl: 'no-cache',
+  },
+  '/app.js': {
+    file: 'app.js',
+    contentType: 'application/javascript; charset=utf-8',
+    cacheControl: 'no-cache',
+  },
+  '/manifest.webmanifest': {
+    file: 'manifest.webmanifest',
+    contentType: 'application/manifest+json; charset=utf-8',
+    cacheControl: 'no-cache',
+  },
+  '/icons/favicon.png': {
+    file: 'icons/favicon.png',
+    contentType: 'image/png',
+    cacheControl: 'public, max-age=3600',
+  },
+  '/icons/apple-touch-icon.png': {
+    file: 'icons/apple-touch-icon.png',
+    contentType: 'image/png',
+    cacheControl: 'public, max-age=3600',
+  },
+};
 
 export interface BuildServerOptions {
   config?: AppConfig;
@@ -158,6 +206,19 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     reply.header('x-request-id', request.id);
     return payload;
   });
+
+  for (const [routePath, asset] of Object.entries(STATIC_ASSETS)) {
+    const assetPath = resolve(PUBLIC_DIR, asset.file);
+    app.get(routePath, async (_request, reply) => {
+      const content = await readFile(assetPath);
+      return reply
+        .status(200)
+        .header('Content-Type', asset.contentType)
+        .header('X-Content-Type-Options', 'nosniff')
+        .header('Cache-Control', asset.cacheControl)
+        .send(content);
+    });
+  }
 
   app.get('/health', async (_request, reply): Promise<HealthResponse> => {
     return reply.status(200).send({

@@ -235,5 +235,31 @@ describe('HTTP server and Chat API foundation', () => {
     expect(body.error.message).toBe('Internal server error');
     expect(typeof body.requestId).toBe('string');
   });
+
+  it('serves the static chat UI and assets from public/ with strict MIME types', async () => {
+    const app = createTestServer();
+
+    const routes: Array<{ url: string; contentType: string; contains?: string }> = [
+      { url: '/', contentType: 'text/html', contains: 'Recall Agent' },
+      { url: '/styles.css', contentType: 'text/css', contains: '--bg-surface' },
+      { url: '/api.js', contentType: 'application/javascript', contains: 'sendChatRequest' },
+      { url: '/app.js', contentType: 'application/javascript', contains: 'createChatApp' },
+      { url: '/manifest.webmanifest', contentType: 'application/manifest+json', contains: 'Recall Agent' },
+      { url: '/icons/favicon.png', contentType: 'image/png' },
+      { url: '/icons/apple-touch-icon.png', contentType: 'image/png' },
+    ];
+
+    for (const route of routes) {
+      const response = await app.inject({ method: 'GET', url: route.url });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toContain(route.contentType);
+      expect(response.headers['x-content-type-options']).toBe('nosniff');
+      if (route.contains) {
+        expect(response.body).toContain(route.contains);
+      } else {
+        expect(response.rawPayload.byteLength).toBeGreaterThan(0);
+      }
+    }
+  });
 });
 
