@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Recall Agent — Editorial Chat</title>
+    <meta
+      name="description"
+      content="Fast, conversational, historically aware web-search workspace."
+    />
+    <meta name="theme-color" content="#f9f9f7" />
+    <link rel="icon" type="image/png" href="/icons/favicon.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <div id="app-shell" class="app-shell">
+      <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+
+      <aside id="sidebar" class="sidebar" aria-label="Workspace navigation">
+        <div class="sidebar-top">
+          <div class="brand-row">
+            <div class="brand-identity">
+              <img
+                class="brand-mark"
+                src="/icons/favicon.png"
+                alt="Recall Agent emblem"
+                width="32"
+                height="32"
+              />
+              <span class="brand-title">Recall Agent</span>
+            </div>
+            <button
+              id="sidebar-close-btn"
+              class="sidebar-close-btn"
+              type="button"
+              aria-label="Close navigation drawer"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M6 6L18 18M18 6L6 18"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <button id="new-chat-btn" class="new-chat-btn" type="button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M12 5V19M5 12H19"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+            </svg>
+            <span>New conversation</span>
+          </button>
+
+          <div class="session-section">
+            <div class="session-section-header">
+              <span class="section-label">This Session</span>
+              <span class="session-scope-badge">Session only</span>
+            </div>
+            <div id="session-list" class="session-list" role="navigation" aria-label="Session conversations">
+              <p class="session-empty-note">
+                Conversations stay in this browser tab until you refresh or close it.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-footer">
+          <button
+            id="about-status-btn"
+            class="status-drawer-btn"
+            type="button"
+            aria-expanded="false"
+            aria-controls="api-info-panel"
+          >
+            <span>About &amp; API Status</span>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M12 3V5M12 19V21M4.22 4.22L5.64 5.64M18.36 18.36L19.78 19.78M3 12H5M19 12H21M12 8C9.79 8 8 9.79 8 12C8 14.21 9.79 16 12 16C14.21 16 16 14.21 16 12C16 9.79 14.21 8 12 8Z"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </aside>
+
+      <div class="workspace-column">
+        <header class="topbar">
+          <div class="topbar-left">
+            <button
+              id="sidebar-toggle-btn"
+              class="icon-btn"
+              type="button"
+              aria-label="Toggle workspace sidebar"
+              aria-expanded="true"
+              aria-controls="sidebar"
+            >
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect
+                  x="3"
+                  y="4"
+                  width="18"
+                  height="16"
+                  rx="2"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                />
+                <path
+                  d="M9 4V20"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                />
+              </svg>
+            </button>
+
+            <div class="connection-pill" aria-live="polite">
+              <span id="connection-dot" class="status-dot is-checking" aria-hidden="true"></span>
+              <span id="connection-text" class="connection-text">Checking server health…</span>
+            </div>
+          </div>
+
+          <div class="topbar-right">
+            <button
+              id="mobile-new-chat-btn"
+              class="mobile-new-chat-btn"
+              type="button"
+              aria-label="Start new conversation"
+            >
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M12 5V19M5 12H19"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+            <span id="topbar-session-tag" class="topbar-session-tag">Session only</span>
+            <div class="avatar-badge" title="Recall Agent">
+              <img src="/icons/favicon.png" alt="Recall Agent icon" width="30" height="30" />
+            </div>
+          </div>
+        </header>
+
+        <main id="main-canvas" class="main-canvas">
+          <div class="canvas-inner">
+            <section id="api-info-panel" class="api-info-panel" hidden aria-label="Server API status">
+              <div class="api-info-header">
+                <h2 class="api-info-title">Server &amp; Endpoint Status</h2>
+                <button
+                  id="close-api-info-btn"
+                  class="icon-btn"
+                  type="button"
+                  aria-label="Close API status panel"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M6 6L18 18M18 6L6 18"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+              <p class="api-info-copy">
+                This interface sends validated prompts directly to
+                <code class="code-inline">POST /api/chat</code> and monitors
+                <code class="code-inline">GET /health</code>. Agent execution and persistent server
+                memory are not enabled in this build yet.
+              </p>
+              <div id="api-info-meta" class="api-info-meta">
+                <span>Checking server metadata…</span>
+              </div>
+            </section>
+
+            <section id="welcome-view" class="welcome-view" aria-labelledby="welcome-heading">
+              <div class="welcome-pill">
+                <span class="status-dot is-online" aria-hidden="true"></span>
+                <span>Recall Editorial · Chat UI</span>
+              </div>
+
+              <div class="welcome-eyebrow">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M12 19L19 12L22 15L15 22L12 19ZM18 13L16.5 5.5L2 2L5.5 16.5L13 18L18 13ZM2 2L9.586 9.586"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                <span>Synthesis Canvas</span>
+              </div>
+
+              <h1 id="welcome-heading" class="welcome-heading">
+                What would you like to revisit or explore?
+              </h1>
+              <p class="welcome-subtitle">
+                Ask a question, test the chat API contract, or draft a prompt in this session.
+              </p>
+
+              <div class="starter-section">
+                <div class="starter-header">
+                  <span class="starter-header-title">Suggested recall paths</span>
+                  <span class="starter-header-hint">Press card to populate prompt</span>
+                </div>
+
+                <button
+                  type="button"
+                  class="starter-card"
+                  data-prompt="What did we discuss about Postgres hosting?"
+                >
+                  <span class="starter-card-main">
+                    <span class="starter-icon-box" aria-hidden="true">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.75" />
+                        <path
+                          d="M12 7V12L15 14"
+                          stroke="currentColor"
+                          stroke-width="1.75"
+                          stroke-linecap="round"
+                        />
+                      </svg>
+                    </span>
+                    <span class="starter-text">
+                      <span class="starter-title">What did we discuss about Postgres hosting?</span>
+                      <span class="starter-desc">
+                        Revisit conclusions, trade-offs, and latency notes within a conversation
+                      </span>
+                    </span>
+                  </span>
+                  <svg
+                    class="starter-arrow"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M5 12H19M13 6L19 12L13 18"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  class="starter-card"
+                  data-prompt="Has the pricing changed since our last comparison?"
+                >
+                  <span class="starter-card-main">
+                    <span class="starter-icon-box" aria-hidden="true">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                        <path
+                          d="M4 17L10 11L14 15L20 9M20 9H15M20 9V14"
+                          stroke="currentColor"
+                          stroke-width="1.75"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <span class="starter-text">
+                      <span class="starter-title"
+                        >Has the pricing changed since our last comparison?</span
+                      >
+                      <span class="starter-desc">
+                        Compare prior claims against current public records &amp; note differences
+                      </span>
+                    </span>
+                  </span>
+                  <svg
+                    class="starter-arrow"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M5 12H19M13 6L19 12L13 18"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  class="starter-card"
+                  data-prompt="Find the latest information and show the sources."
+                >
+                  <span class="starter-card-main">
+                    <span class="starter-icon-box" aria-hidden="true">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                        <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.75" />
+                        <path
+                          d="M20 20L16 16"
+                          stroke="currentColor"
+                          stroke-width="1.75"
+                          stroke-linecap="round"
+                        />
+                      </svg>
+                    </span>
+                    <span class="starter-text">
+                      <span class="starter-title"
+                        >Find the latest information and show the sources.</span
+                      >
+                      <span class="starter-desc">
+                        Concise synthesis with explicit dates and source links when agent search is
+                        enabled
+                      </span>
+                    </span>
+                  </span>
+                  <svg
+                    class="starter-arrow"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M5 12H19M13 6L19 12L13 18"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div class="preview-banner" role="note">
+                <div class="preview-banner-icon" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.75" />
+                    <path
+                      d="M12 16V11M12 8H12.01"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                </div>
+                <div class="preview-banner-body">
+                  <div class="preview-banner-title-row">
+                    <span class="preview-banner-title">Agent Routing Initialization</span>
+                    <span class="preview-badge">Read-Only Preview</span>
+                  </div>
+                  <p class="preview-banner-copy">
+                    Chat responses aren’t available yet. Submitting a prompt calls
+                    <code class="code-inline">POST /api/chat</code> directly and displays the
+                    server’s honest <code class="code-inline">501 AGENT_NOT_IMPLEMENTED</code>
+                    response.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section id="thread-view" class="thread-view" hidden aria-label="Conversation thread">
+              <div class="thread-meta-bar">
+                <div class="thread-meta-left">
+                  <span id="thread-conversation-id" class="thread-meta-id"></span>
+                </div>
+                <span class="thread-meta-badge">Session only · Not saved to disk</span>
+              </div>
+              <p id="omitted-history-note" class="thread-omitted-note" hidden role="status"></p>
+              <div id="message-list" class="message-list"></div>
+            </section>
+
+            <div id="live-status" class="sr-only" aria-live="polite"></div>
+          </div>
+        </main>
+
+        <div class="composer-dock">
+          <form id="composer-form" class="composer-form" novalidate>
+            <label for="chat-input" class="sr-only">Message Recall Agent</label>
+            <textarea
+              id="chat-input"
+              class="composer-textarea"
+              rows="2"
+              placeholder="Ask Recall Agent to synthesize, retrieve or compare..."
+            ></textarea>
+            <p id="composer-error" class="composer-error" hidden role="alert"></p>
+            <div class="composer-footer">
+              <div class="composer-hints">
+                <span class="keyboard-hint">Enter to send, Shift+Enter for new line</span>
+                <span id="char-counter" class="char-counter">0 / 16,000</span>
+              </div>
+              <button
+                id="send-button"
+                class="send-btn"
+                type="submit"
+                aria-label="Send message"
+                disabled
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M12 19V5M6 11L12 5L18 11"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
