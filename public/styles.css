@@ -44,8 +44,7 @@
   box-sizing: border-box;
 }
 
-html,
-body {
+html {
   margin: 0;
   padding: 0;
   background-color: var(--bg-surface);
@@ -55,11 +54,20 @@ body {
   line-height: 22px;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  overflow-y: auto;
 }
 
 body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 22px;
+  -webkit-font-smoothing: antialiased;
   min-height: 100dvh;
-  overscroll-behavior: none;
+  overflow: visible;
 }
 
 .sr-only {
@@ -1292,6 +1300,7 @@ textarea:focus-visible,
   padding: 12px 14px;
   box-shadow: var(--shadow-ambient);
   transition: border-color 140ms ease, opacity 140ms ease;
+  cursor: text;
 }
 
 .composer-form:focus-within {

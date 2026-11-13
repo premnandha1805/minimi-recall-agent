@@ -1010,4 +1010,112 @@ describe('Recall Agent Chat UI (public/index.html + app.js + api.js)', () => {
     expect(messageList.textContent).toContain('Chat responses aren’t available yet');
     expect(app.getActiveSession().history.some((h) => h.role === 'assistant')).toBe(false);
   });
+
+  it('22. clicking composer form padding or non-interactive areas delegates focus to chat input', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
+    });
+
+    await mountApp(fetchMock);
+
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const charCounter = document.getElementById('char-counter') as HTMLElement;
+    const keyboardHint = document.querySelector('.keyboard-hint') as HTMLElement;
+    const sendButton = document.getElementById('send-button') as HTMLButtonElement;
+
+    // Start with something else focused or unfocused
+    document.body.focus();
+    expect(document.activeElement).not.toBe(chatInput);
+
+    // Clicking on form card background focuses chatInput
+    form.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(chatInput);
+
+    // Blur and test clicking keyboard hint
+    chatInput.blur();
+    expect(document.activeElement).not.toBe(chatInput);
+    keyboardHint.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(chatInput);
+
+    // Blur and test clicking char counter
+    chatInput.blur();
+    expect(document.activeElement).not.toBe(chatInput);
+    charCounter.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(chatInput);
+
+    // Selection position is placed at end
+    chatInput.value = 'Existing text';
+    chatInput.blur();
+    form.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(chatInput);
+    expect(chatInput.selectionStart).toBe('Existing text'.length);
+    expect(chatInput.selectionEnd).toBe('Existing text'.length);
+
+    // Clicking send button when disabled does not trigger error
+    sendButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    // If chatInput is disabled during active request, clicking form does not focus
+    document.body.focus();
+    chatInput.disabled = true;
+    expect(document.activeElement).not.toBe(chatInput);
+    form.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(document.activeElement).not.toBe(chatInput);
+  });
+
+  it('23. verifies CSS layout rules for root scrolling and composer affordance', () => {
+    const cssPath = resolve(import.meta.dirname, '..', 'public', 'styles.css');
+    const css = readFileSync(cssPath, 'utf8');
+
+    // html must be the viewport scroll container
+    expect(css).toMatch(/html\s*\{[^}]*overflow-x:\s*hidden;/);
+    expect(css).toMatch(/html\s*\{[^}]*overflow-y:\s*auto;/);
+
+    // body must have overflow: visible to prevent trapping scroll/wheel events
+    expect(css).toMatch(/body\s*\{[^}]*overflow:\s*visible;/);
+    // body must NOT have overscroll-behavior: none which cancels wheel bubbling
+    expect(css).not.toMatch(/body\s*\{[^}]*overscroll-behavior:\s*none;/);
+
+    // composer-form must have cursor: text and pointer-events: auto
+    expect(css).toMatch(/\.composer-form\s*\{[^}]*pointer-events:\s*auto;/);
+    expect(css).toMatch(/\.composer-form\s*\{[^}]*cursor:\s*text;/);
+
+    // composer-dock has pointer-events: none so clicks outside form pass through
+    expect(css).toMatch(/\.composer-dock\s*\{[^}]*pointer-events:\s*none;/);
+  });
+
+  it('24. maintains chat input focus after new chat and submission recovery', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (input === '/health') {
+        return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
+      }
+      return new Response(
+        JSON.stringify({
+          error: { code: 'AGENT_NOT_IMPLEMENTED', message: 'Chat agent is under construction' },
+          requestId: 'req-501',
+        }),
+        { status: 501, headers: { 'content-type': 'application/json' } },
+      );
+    });
+
+    const app = await mountApp(fetchMock);
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+
+    // Submit message
+    chatInput.value = 'Hello';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+
+    // After 501, chatInput should be re-enabled and focused
+    expect(chatInput.disabled).toBe(false);
+    expect(document.activeElement).toBe(chatInput);
+
+    // Start New Conversation focuses chatInput
+    chatInput.blur();
+    expect(document.activeElement).not.toBe(chatInput);
+    app.startNewConversation();
+    expect(document.activeElement).toBe(chatInput);
+  });
 });
