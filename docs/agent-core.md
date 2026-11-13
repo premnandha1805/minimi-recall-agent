@@ -37,10 +37,11 @@ unknown-citation output is rejected, not converted to a successful answer.
 Malformed/unsupported tool calls and repeated tool-call IDs stop the loop.
 Duplicate queries are reported to the model; an all-duplicate round ends research.
 
-`WebSearch` is an injectable boundary, not a real search implementation. One
-invocation must make exactly one provider request and honor its signal. The future
-Tavily adapter must supply genuine title/URL/text/retrieval timestamp and only
-known publication/effective dates. At most three documents per query are accepted;
+`WebSearch` is an injectable boundary. `createTavilySearch(config)` now provides a
+real basic-search implementation (see [web-search.md](./web-search.md)). Each
+admitted invocation makes one provider request and honors its signal. The adapter
+supplies provider title/URL/snippets, an observed retrieval timestamp, and only
+valid explicit publication dates. At most three documents per query are accepted;
 text is limited to 2,000 characters before both model context and source storage.
 Source IDs are unique per run and assigned in query order. Unavailable search is
 an explicit tool result, not an empty successful search. Tests use labeled fixtures.
@@ -67,7 +68,8 @@ the Azure label alone does not establish compatibility or free/student eligibili
 
 The frozen design's target architecture is unchanged. This feature deliberately
 does not complete its SSE/live-search gate: an agreed SSE event contract, model
-streaming, frontend consumption, Tavily, persistent history/date anchoring, and
+streaming, frontend consumption, wiring the Tavily adapter into HTTP execution,
+persistent history/date anchoring, and
 quote verification still need implementation. Do not expose the internal result
 as an invented HTTP 200 payload. No live credentials/quota or live latency have
 been verified. Existing environment defaults do not imply an implemented Gemini
