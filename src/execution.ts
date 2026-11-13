@@ -1,5 +1,28 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
+export class ExecutionTimeoutError extends Error {
+  constructor(message = 'Operation deadline exceeded') { super(message); this.name = 'ExecutionTimeoutError'; }
+}
+
+/** A disposable child deadline; parent disconnect/deadline always wins. */
+export function createDeadlineScope(parent: AbortSignal, timeoutMs: number): {
+  signal: AbortSignal; dispose: () => void;
+} {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > 25_000) {
+    throw new RangeError('Deadline must be between 0 and 25000 ms');
+  }
+  const controller = new AbortController();
+  const forward = () => controller.abort(parent.reason);
+  parent.addEventListener('abort', forward, { once: true });
+  const timer = setTimeout(() => controller.abort(new ExecutionTimeoutError()), timeoutMs);
+  if (parent.aborted) forward();
+  else if (timeoutMs === 0) controller.abort(new ExecutionTimeoutError());
+  return {
+    signal: controller.signal,
+    dispose: () => { clearTimeout(timer); parent.removeEventListener('abort', forward); },
+  };
+}
+
 /** Starts at request arrival and ends when the response finishes or the client leaves. */
 export function createExecution(
   request: IncomingMessage,
@@ -19,7 +42,7 @@ export function createExecution(
       return;
     }
     dispose();
-    controller.abort(new Error('Request deadline exceeded'));
+    controller.abort(new ExecutionTimeoutError('Request deadline exceeded'));
     onDeadline();
   }, deadlineMs);
   timer.unref();

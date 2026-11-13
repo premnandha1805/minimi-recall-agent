@@ -1,0 +1,146 @@
+import { z } from 'zod';
+import { ChatRequestSchema, type ChatRequest } from './contracts.js';
+import { createDeadlineScope, ExecutionTimeoutError, runWithSignal } from './execution.js';
+import { contextFits, ModelResponseSchema, type ModelMessage, type ModelProvider, type ModelResponse } from './model.js';
+import { AGENT_SYSTEM_PROMPT } from './prompts.js';
+import { SEARCH_LIMITS, SearchArgumentsSchema, SearchSession, WEB_SEARCH_TOOL, type Source, type WebSearch } from './search.js';
+
+export const AGENT_LIMITS = Object.freeze({ deadlineMs: 25_000, modelTimeoutMs: 10_000,
+  modelCalls: 3, maxOutputTokens: 2048, totalOutputTokens: 6144 });
+const RunOptionsSchema = z.strictObject({
+  deadlineMs: z.number().int().min(1).max(AGENT_LIMITS.deadlineMs).default(AGENT_LIMITS.deadlineMs),
+  modelTimeoutMs: z.number().int().min(1).max(AGENT_LIMITS.modelTimeoutMs).default(AGENT_LIMITS.modelTimeoutMs),
+  outputTokenBudget: z.number().int().min(1).max(AGENT_LIMITS.totalOutputTokens).default(AGENT_LIMITS.totalOutputTokens),
+});
+export type AgentStopReason = 'answer' | 'empty_output' | 'invalid_request' | 'invalid_response' |
+  'invalid_tool_call' | 'unsupported_tool' | 'repeated_tool_call' | 'round_limit' | 'context_limit' |
+  'output_budget' | 'output_limit' | 'content_filter' | 'invalid_citation' | 'provider_error' |
+  'model_timeout' | 'deadline' | 'cancelled';
+/** Internal result only. This is NOT a new POST /api/chat or SSE response contract. */
+export interface AgentResult {
+  status: 'completed' | 'partial' | 'failed' | 'cancelled';
+  reason: AgentStopReason;
+  answer?: string;
+  sources: Source[];
+  issues: string[];
+  stats: { modelCalls: number; searchRounds: number; searchRequests: number; reservedOutputTokens: number };
+  usage: NonNullable<ModelResponse['usage']>[];
+}
+export interface AgentOptions {
+  provider: ModelProvider;
+  signal: AbortSignal;
+  search?: WebSearch;
+  /** Monotonic request-arrival time, if already known by the caller. */
+  startedAt?: number;
+  deadlineMs?: number;
+  modelTimeoutMs?: number;
+  outputTokenBudget?: number;
+}
+
+export async function runAgent(input: ChatRequest, options: AgentOptions): Promise<AgentResult> {
+  const result: AgentResult = { status: 'failed', reason: 'invalid_request', sources: [], issues: [],
+    stats: { modelCalls: 0, searchRounds: 0, searchRequests: 0, reservedOutputTokens: 0 }, usage: [] };
+  const limits = RunOptionsSchema.safeParse({ deadlineMs: options.deadlineMs,
+    modelTimeoutMs: options.modelTimeoutMs, outputTokenBudget: options.outputTokenBudget });
+  const parsed = ChatRequestSchema.safeParse(input);
+  const now = performance.now();
+  const startedAt = options.startedAt ?? now;
+  if (!limits.success || !parsed.success || !Number.isFinite(startedAt) || startedAt > now ||
+      !Number.isInteger(options.provider.contextWindowTokens) || options.provider.contextWindowTokens < 4096 ||
+      options.provider.contextWindowTokens > 1_000_000) return result;
+  const deadline = createDeadlineScope(options.signal, Math.max(0, limits.data.deadlineMs - (now - startedAt)));
+  const search = new SearchSession(options.search, deadline.signal, startedAt);
+  const issues = new Set<string>();
+  const seenCallIds = new Set<string>();
+  const messages: ModelMessage[] = [
+    { role: 'system', content: AGENT_SYSTEM_PROMPT },
+    // Preserve the supplied original history. Reject oversized context rather than silently
+    // dropping anchors; date/keyword-based history selection belongs to the memory feature.
+    ...(parsed.data.history ?? []).map((message): ModelMessage => ({ role: message.role,
+      content: JSON.stringify({ timestamp: message.timestamp, content: message.content }) })),
+    { role: 'user', content: parsed.data.message },
+  ];
+  let toolsEnabled = true;
+  const finish = (reason: AgentStopReason, answer?: string): AgentResult => {
+    result.reason = reason;
+    result.status = reason === 'cancelled' ? 'cancelled' :
+      reason === 'answer' ? (issues.size ? 'partial' : 'completed') : 'failed';
+    if (answer !== undefined) result.answer = answer;
+    return result;
+  };
+  try {
+    for (let step = 0; step < AGENT_LIMITS.modelCalls; step++) {
+      deadline.signal.throwIfAborted();
+      const remaining = limits.data.outputTokenBudget - result.stats.reservedOutputTokens;
+      if (remaining <= 0) return finish('output_budget');
+      const maxOutputTokens = Math.min(AGENT_LIMITS.maxOutputTokens, remaining);
+      const tools = toolsEnabled && step < SEARCH_LIMITS.rounds ? [WEB_SEARCH_TOOL] : [];
+      if (!contextFits({ messages, tools, maxOutputTokens }, options.provider.contextWindowTokens)) return finish('context_limit');
+      const modelScope = createDeadlineScope(deadline.signal, limits.data.modelTimeoutMs);
+      let response: ModelResponse;
+      try {
+        const raw = await runWithSignal(modelScope.signal, () => {
+          result.stats.modelCalls++;
+          // Reserve the maximum even if usage is absent or a request fails. No hidden retries.
+          result.stats.reservedOutputTokens += maxOutputTokens;
+          return options.provider.complete({ messages: structuredClone(messages), tools: structuredClone(tools),
+            maxOutputTokens, signal: modelScope.signal });
+        });
+        deadline.signal.throwIfAborted();
+        const validated = ModelResponseSchema.safeParse(raw);
+        if (!validated.success) return finish('invalid_response');
+        response = validated.data;
+      } catch {
+        if (deadline.signal.aborted) deadline.signal.throwIfAborted();
+        return finish(modelScope.signal.reason instanceof ExecutionTimeoutError ? 'model_timeout' : 'provider_error');
+      } finally { modelScope.dispose(); }
+      if (response.usage) {
+        result.usage.push(response.usage);
+        if (response.usage.outputTokens > maxOutputTokens) return finish('output_limit');
+      }
+      if (response.finishReason === 'content_filter') return finish('content_filter');
+      if (response.finishReason === 'length') return finish('output_limit');
+      if (!response.toolCalls.length) {
+        if (response.finishReason !== 'stop') return finish('invalid_response');
+        if (!response.text.trim()) return finish('empty_output');
+        const knownIds = new Set(search.sources.map((source) => source.id));
+        if ([...response.text.matchAll(/\[(S\d+)\]/g)].some((match) => !knownIds.has(match[1]))) return finish('invalid_citation');
+        return finish('answer', response.text);
+      }
+      if (!tools.length) return finish('round_limit');
+      if (response.finishReason !== 'tool_calls') return finish('invalid_response');
+      const groups: string[][] = [];
+      for (const call of response.toolCalls) {
+        if (call.name !== 'web_search') return finish('unsupported_tool');
+        if (seenCallIds.has(call.id)) return finish('repeated_tool_call');
+        seenCallIds.add(call.id);
+        let args: unknown;
+        try { args = JSON.parse(call.arguments); } catch { return finish('invalid_tool_call'); }
+        const valid = SearchArgumentsSchema.safeParse(args);
+        if (!valid.success) return finish('invalid_tool_call');
+        groups.push(valid.data.queries);
+      }
+      messages.push({ role: 'assistant', content: response.text, toolCalls: response.toolCalls });
+      const outcomes = await search.runRound(groups);
+      for (let i = 0; i < outcomes.length; i++) {
+        for (const outcome of outcomes[i]) {
+          if (!['ok', 'duplicate'].includes(outcome.status)) issues.add(`search_${outcome.status}`);
+        }
+        messages.push({ role: 'tool', toolCallId: response.toolCalls[i].id, content: JSON.stringify(outcomes[i]) });
+      }
+      if (!options.search || performance.now() - startedAt >= SEARCH_LIMITS.cutoffMs || search.attempts >= SEARCH_LIMITS.total ||
+          outcomes.flat().every((outcome) => outcome.status === 'duplicate')) toolsEnabled = false;
+    }
+    return finish('round_limit');
+  } catch {
+    return finish(options.signal.aborted ?
+      (options.signal.reason instanceof ExecutionTimeoutError ? 'deadline' : 'cancelled') :
+      deadline.signal.aborted ? 'deadline' : 'provider_error');
+  } finally {
+    deadline.dispose();
+    result.sources = search.sources;
+    result.issues = [...issues];
+    result.stats.searchRounds = search.rounds;
+    result.stats.searchRequests = search.attempts;
+  }
+}

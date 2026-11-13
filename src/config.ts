@@ -24,7 +24,7 @@ export const EnvSchema = z.object({
     .default('Asia/Kolkata')
     .refine(isValidTimeZone, 'Invalid IANA timezone'),
   MODEL_PROVIDER: z
-    .enum(['gemini', 'groq', 'openrouter', 'openai', 'anthropic'])
+    .enum(['gemini', 'groq', 'openrouter', 'openai', 'anthropic', 'azure-openai-v1'])
     .default('gemini'),
   MODEL_NAME: z.string().trim().min(1).default('gemini-2.5-flash'),
   GEMINI_API_KEY: optionalNonEmptyString,
@@ -32,7 +32,27 @@ export const EnvSchema = z.object({
   OPENROUTER_API_KEY: optionalNonEmptyString,
   OPENAI_API_KEY: optionalNonEmptyString,
   ANTHROPIC_API_KEY: optionalNonEmptyString,
+  AZURE_OPENAI_API_KEY: optionalNonEmptyString,
+  AZURE_OPENAI_DEPLOYMENT: optionalNonEmptyString,
+  AZURE_OPENAI_CHAT_ENDPOINT: optionalNonEmptyString.refine((value) => {
+    if (value === undefined) return true;
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash &&
+        url.pathname === '/openai/v1/chat/completions';
+    } catch { return false; }
+  }, 'Expected an HTTPS Azure OpenAI v1 chat completions URL without credentials or query parameters'),
+  AZURE_OPENAI_CONTEXT_TOKENS: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.coerce.number().int().min(4096).max(1_000_000).optional()
+  ),
   TAVILY_API_KEY: optionalNonEmptyString,
+}).superRefine((config, context) => {
+  if (config.MODEL_PROVIDER !== 'azure-openai-v1') return;
+  for (const field of ['AZURE_OPENAI_API_KEY', 'AZURE_OPENAI_DEPLOYMENT',
+    'AZURE_OPENAI_CHAT_ENDPOINT', 'AZURE_OPENAI_CONTEXT_TOKENS'] as const) {
+    if (!config[field]) context.addIssue({ code: 'custom', path: [field], message: 'Required for azure-openai-v1' });
+  }
 });
 
 export type AppConfig = z.infer<typeof EnvSchema>;

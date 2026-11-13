@@ -84,6 +84,7 @@ const LOG_REDACT_PATHS = [
   '*.OPENROUTER_API_KEY',
   '*.OPENAI_API_KEY',
   '*.ANTHROPIC_API_KEY',
+  '*.AZURE_OPENAI_API_KEY',
   '*.TAVILY_API_KEY',
 ];
 
@@ -258,13 +259,13 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         hasConversationId: Boolean(parsed.data.conversationId),
         historyCount: parsed.data.history?.length ?? 0,
       },
-      'Validated chat request received while agent runtime is not yet implemented'
+      'Validated chat request; agent HTTP streaming integration is not yet implemented'
     );
 
     return reply.status(501).send(
       buildErrorResponse(
         'AGENT_NOT_IMPLEMENTED',
-        'Chat agent execution is not implemented yet. Only the HTTP server and request validation foundation are active.',
+        'Chat agent HTTP integration is not implemented yet. The internal core awaits the SSE contract and frontend integration.',
         request.id,
         { conversationId: parsed.data.conversationId }
       )
