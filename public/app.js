@@ -1276,6 +1276,29 @@ export function createChatApp(options = {}) {
     { signal: listenerSignal },
   );
 
+  // Focus chatInput when clicking composer card background/padding/non-interactive areas
+  composerForm.addEventListener(
+    'click',
+    (event) => {
+      const target = /** @type {HTMLElement | null} */ (event.target);
+      if (!target || target === chatInput || chatInput.disabled) {
+        return;
+      }
+      const interactive = target.closest(
+        'button, a, input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (interactive && interactive !== composerForm) {
+        return;
+      }
+      chatInput.focus();
+      const len = chatInput.value.length;
+      if (typeof chatInput.setSelectionRange === 'function') {
+        chatInput.setSelectionRange(len, len);
+      }
+    },
+    { signal: listenerSignal },
+  );
+
   chatInput.addEventListener(
     'input',
     () => {
