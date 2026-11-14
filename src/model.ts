@@ -36,6 +36,7 @@ export const ModelResponseSchema = z.strictObject({
   usage: z.strictObject({
     inputTokens: z.number().int().nonnegative().max(1_000_000),
     outputTokens: z.number().int().nonnegative().max(1_000_000),
+    reasoningTokens: z.number().int().nonnegative().max(1_000_000).optional(),
   }).optional(),
 });
 export type ModelResponse = z.infer<typeof ModelResponseSchema>;
@@ -76,6 +77,10 @@ const AzureResponseSchema = z.object({
   usage: z.object({
     prompt_tokens: ModelResponseSchema.shape.usage.unwrap().shape.inputTokens,
     completion_tokens: ModelResponseSchema.shape.usage.unwrap().shape.outputTokens,
+    // Optional telemetry must not invalidate an otherwise usable response.
+    completion_tokens_details: z.object({
+      reasoning_tokens: ModelResponseSchema.shape.usage.unwrap().shape.reasoningTokens,
+    }).optional().catch(undefined),
   }).optional(),
 });
 
@@ -162,6 +167,9 @@ export function createModelProvider(config: AppConfig, fetchImpl: typeof fetch =
           finishReason: choice.message.refusal ? 'content_filter' : choice.finish_reason,
           ...(parsed.data.usage ? { usage: {
             inputTokens: parsed.data.usage.prompt_tokens, outputTokens: parsed.data.usage.completion_tokens,
+            ...(parsed.data.usage.completion_tokens_details?.reasoning_tokens !== undefined ? {
+              reasoningTokens: parsed.data.usage.completion_tokens_details.reasoning_tokens,
+            } : {}),
           } } : {}),
         };
       }).catch((error: unknown) => {

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createDeadlineScope, ExecutionTimeoutError, runWithSignal } from './execution.js';
 import type { ModelTool } from './model.js';
 import type { AppConfig } from './config.js';
+import { abortOutcome, observeStage, sourceCounts, type StageObserver, type StageOutcome } from './observability.js';
 
 export const SEARCH_LIMITS = Object.freeze({ rounds: 2, total: 8, firstRound: 5, secondRound: 3,
   concurrency: 2, timeoutMs: 4000, cutoffMs: 15_000 });
@@ -199,9 +200,29 @@ export class SearchSession {
   private timedOut = false;
 
   constructor(private readonly search: WebSearch | undefined, private readonly signal: AbortSignal,
-    private readonly startedAt: number) {}
+    private readonly startedAt: number, private readonly observe?: StageObserver) {}
 
   async runRound(groups: string[][]): Promise<SearchOutcome[][]> {
+    const startedAt = performance.now();
+    const initialAttempts = this.attempts;
+    const initialSources = this.sources.length;
+    let outcome: StageOutcome = 'failure';
+    try {
+      const results = await this.executeRound(groups);
+      const statuses = results.flat().map((result) => result.status);
+      outcome = statuses.includes('timeout') ? 'timeout' :
+        statuses.every((status) => status === 'ok' || status === 'duplicate') ? 'success' : 'failure';
+      return results;
+    } catch (error) {
+      outcome = abortOutcome(this.signal);
+      throw error;
+    } finally {
+      observeStage(this.observe, startedAt, { stage: 'search_round', outcome, round: this.rounds,
+        searchCalls: this.attempts - initialAttempts, ...sourceCounts(this.sources.slice(initialSources)) });
+    }
+  }
+
+  private async executeRound(groups: string[][]): Promise<SearchOutcome[][]> {
     this.signal.throwIfAborted();
     this.rounds++;
     const roundLimit = this.rounds === 1 ? SEARCH_LIMITS.firstRound :
@@ -228,22 +249,33 @@ export class SearchSession {
           roundReserved++;
           this.reserved++;
           const scope = createDeadlineScope(this.signal, SEARCH_LIMITS.timeoutMs);
+          let providerStartedAt: number | undefined;
+          let call = 0;
+          let providerOutcome: StageOutcome = 'failure';
           try {
             const raw = await runWithSignal(scope.signal, () => {
               // Count actual invocations, including synchronous throws and rejected promises.
               this.attempts++;
+              call = this.attempts;
+              providerStartedAt = performance.now();
               return this.search!(job.query, { signal: scope.signal });
             });
             const parsed = z.array(SourceDocumentSchema).max(3).safeParse(raw);
             status = parsed.success ? 'ok' : 'invalid_results';
             if (parsed.success) documents = parsed.data;
+            if (parsed.success) providerOutcome = 'success';
           } catch {
+            providerOutcome = abortOutcome(scope.signal);
             if (this.signal.aborted) this.signal.throwIfAborted();
             status = scope.signal.reason instanceof ExecutionTimeoutError ? 'timeout' : 'failed';
             // An uncooperative timed-out provider may still occupy a socket. Do not start
             // replacements that would exceed the physical provider concurrency bound.
             if (status === 'timeout') this.timedOut = true;
-          } finally { scope.dispose(); }
+          } finally {
+            scope.dispose();
+            if (providerStartedAt !== undefined) observeStage(this.observe, providerStartedAt,
+              { stage: 'search_provider', outcome: providerOutcome, call, round: this.rounds, ...sourceCounts(documents) });
+          }
         }
         outcomes[job.group][job.index] = {
           query: job.query, status,

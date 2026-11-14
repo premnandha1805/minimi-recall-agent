@@ -17,6 +17,17 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('Azure OpenAI v1 adapter (mock HTTP only)', () => {
+  it.each([0, 1, undefined, -1, 'PRIVATE', null])('accepts only valid optional reasoning usage: %j', async (reasoning) => {
+    const payload = wire();
+    const provider = createModelProvider(loadConfig(azureEnv), async () => json({ ...payload,
+      usage: { ...payload.usage, completion_tokens_details: { reasoning_tokens: reasoning } },
+    }));
+    const result = await provider.complete(request());
+    expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 2,
+      ...(reasoning === 0 || reasoning === 1 ? { reasoningTokens: reasoning } : {}),
+    });
+  });
+
   it('maps configured endpoint, deployment, auth, output budget and the only tool without guessing API versions', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => json(wire()));
     const provider = createModelProvider(loadConfig(azureEnv), fetchMock);

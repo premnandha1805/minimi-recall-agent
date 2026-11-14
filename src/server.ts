@@ -306,6 +306,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         },
         signal: request.executionSignal, startedAt: request.executionStartedAt,
         deadlineMs: config.REQUEST_DEADLINE_MS,
+        observe: (event) => request.log.info({ requestId: request.id, ...event }, 'Agent stage completed'),
       });
       if (result.reason === 'answer') {
         stream.complete(ChatResultSchema.parse({

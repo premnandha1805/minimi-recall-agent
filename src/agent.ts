@@ -3,6 +3,7 @@ import { ChatRequestSchema, type ChatRequest } from './contracts.js';
 import { createDeadlineScope, ExecutionTimeoutError, runWithSignal } from './execution.js';
 import { contextFits, ModelResponseSchema, type ModelMessage, type ModelProvider, type ModelResponse } from './model.js';
 import { AGENT_SYSTEM_PROMPT } from './prompts.js';
+import { abortOutcome, observeStage, sourceCounts, tokenUsage, type StageObserver, type StageOutcome } from './observability.js';
 import { SEARCH_LIMITS, SearchArgumentsSchema, SearchSession, WEB_SEARCH_TOOL, type Source, type WebSearch } from './search.js';
 
 export const AGENT_LIMITS = Object.freeze({ deadlineMs: 25_000, modelTimeoutMs: 10_000,
@@ -35,11 +36,19 @@ export interface AgentOptions {
   deadlineMs?: number;
   modelTimeoutMs?: number;
   outputTokenBudget?: number;
+  observe?: StageObserver;
 }
 
 export async function runAgent(input: ChatRequest, options: AgentOptions): Promise<AgentResult> {
+  const agentStartedAt = performance.now();
   const result: AgentResult = { status: 'failed', reason: 'invalid_request', sources: [], issues: [],
     stats: { modelCalls: 0, searchRounds: 0, searchRequests: 0, reservedOutputTokens: 0 }, usage: [] };
+  const observeTotal = () => observeStage(options.observe, agentStartedAt, {
+    stage: 'agent', outcome: result.reason === 'answer' ? 'success' :
+      ['model_timeout', 'deadline'].includes(result.reason) ? 'timeout' : result.reason === 'cancelled' ? 'abort' : 'failure',
+    agentStatus: result.status, modelCalls: result.stats.modelCalls, searchCalls: result.stats.searchRequests,
+    ...sourceCounts(result.sources),
+  });
   const limits = RunOptionsSchema.safeParse({ deadlineMs: options.deadlineMs,
     modelTimeoutMs: options.modelTimeoutMs, outputTokenBudget: options.outputTokenBudget });
   const parsed = ChatRequestSchema.safeParse(input);
@@ -47,9 +56,9 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
   const startedAt = options.startedAt ?? now;
   if (!limits.success || !parsed.success || !Number.isFinite(startedAt) || startedAt > now ||
       !Number.isInteger(options.provider.contextWindowTokens) || options.provider.contextWindowTokens < 4096 ||
-      options.provider.contextWindowTokens > 1_000_000) return result;
+      options.provider.contextWindowTokens > 1_000_000) { observeTotal(); return result; }
   const deadline = createDeadlineScope(options.signal, Math.max(0, limits.data.deadlineMs - (now - startedAt)));
-  const search = new SearchSession(options.search, deadline.signal, startedAt);
+  const search = new SearchSession(options.search, deadline.signal, startedAt, options.observe);
   const issues = new Set<string>();
   const seenCallIds = new Set<string>();
   const messages: ModelMessage[] = [
@@ -77,9 +86,12 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       const tools = toolsEnabled && step < SEARCH_LIMITS.rounds ? [WEB_SEARCH_TOOL] : [];
       if (!contextFits({ messages, tools, maxOutputTokens }, options.provider.contextWindowTokens)) return finish('context_limit');
       const modelScope = createDeadlineScope(deadline.signal, limits.data.modelTimeoutMs);
-      let response: ModelResponse;
+      let response: ModelResponse | undefined;
+      let modelStartedAt: number | undefined;
+      let modelOutcome: StageOutcome = 'failure';
       try {
         const raw = await runWithSignal(modelScope.signal, () => {
+          modelStartedAt = performance.now();
           result.stats.modelCalls++;
           // Reserve the maximum even if usage is absent or a request fails. No hidden retries.
           result.stats.reservedOutputTokens += maxOutputTokens;
@@ -90,10 +102,26 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
         const validated = ModelResponseSchema.safeParse(raw);
         if (!validated.success) return finish('invalid_response');
         response = validated.data;
+        // Success here means a valid provider response, not factual/citation verification.
+        modelOutcome = 'success';
       } catch {
+        modelOutcome = abortOutcome(modelScope.signal);
         if (deadline.signal.aborted) deadline.signal.throwIfAborted();
         return finish(modelScope.signal.reason instanceof ExecutionTimeoutError ? 'model_timeout' : 'provider_error');
-      } finally { modelScope.dispose(); }
+      } finally {
+        modelScope.dispose();
+        if (modelStartedAt !== undefined) {
+          const modelEndedAt = performance.now();
+          const metrics = { outcome: modelOutcome, call: result.stats.modelCalls, usage: tokenUsage(response?.usage) };
+          observeStage(options.observe, modelStartedAt, { stage: 'model_call', ...metrics }, modelEndedAt);
+          // Known before execution when tools are disabled, otherwise identified from
+          // an answer response. A failed tool-enabled call has no inferable purpose.
+          if (!tools.length || (response?.finishReason === 'stop' && !response.toolCalls.length)) {
+            observeStage(options.observe, modelStartedAt,
+              { stage: 'final_synthesis', outcome: modelOutcome, call: result.stats.modelCalls }, modelEndedAt);
+          }
+        }
+      }
       if (response.usage) {
         result.usage.push(response.usage);
         if (response.usage.outputTokens > maxOutputTokens) return finish('output_limit');
@@ -142,5 +170,6 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
     result.issues = [...issues];
     result.stats.searchRounds = search.rounds;
     result.stats.searchRequests = search.attempts;
+    observeTotal();
   }
 }
