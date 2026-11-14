@@ -50,7 +50,7 @@ const utf8Encoder = new TextEncoder();
 
 /**
  * @typedef {Object} ChatApiResult
- * @property {'not_implemented' | 'http_error' | 'network_error' | 'aborted' | 'unsupported_response' | 'ok'} kind
+ * @property {'not_implemented' | 'http_error' | 'network_error' | 'aborted' | 'unsupported_response' | 'protocol_error' | 'stream_error' | 'ok'} kind
  * @property {number} [status]
  * @property {string} [code]
  * @property {string} [message]
@@ -60,6 +60,7 @@ const utf8Encoder = new TextEncoder();
  * @property {string} [contentType]
  * @property {Response} [rawResponse]
  * @property {unknown} [data]
+ * @property {import('../src/contracts.js').ChatResult} [result]
  * @property {number} [omittedHistoryCount]
  */
 
@@ -288,7 +289,7 @@ export async function checkHealth(options = {}) {
  * @param {{ signal?: AbortSignal, fetchImpl?: typeof fetch, maxHistoryItems?: number, maxBodyBytes?: number }} [options]
  * @returns {Promise<ChatApiResult>}
  */
-export async function sendChatRequest(payload, options = {}) {
+async function sendChatRequestInner(payload, options = {}) {
   const fetchFn = options.fetchImpl ?? globalThis.fetch;
 
   if (options.signal?.aborted) {
@@ -337,24 +338,33 @@ export async function sendChatRequest(payload, options = {}) {
     };
   }
 
+  if (options.signal?.aborted) {
+    void response.body?.cancel().catch(() => {});
+    return { kind: 'aborted' };
+  }
   const contentType = response.headers.get('content-type') || '';
   const headerRequestId = response.headers.get('x-request-id') || undefined;
 
-  if (response.ok && contentType.includes('text/event-stream')) {
-    return {
-      kind: 'ok',
-      status: response.status,
-      contentType,
-      requestId: headerRequestId,
-      rawResponse: response,
-      omittedHistoryCount: omittedCount,
-    };
+  if (response.status === 200 && contentType.split(';')[0].trim().toLowerCase() === 'text/event-stream') {
+    try {
+      const streamed = await readChatStream(response, options);
+      if ((headerRequestId && headerRequestId !== streamed.meta.requestId) ||
+          (payload.conversationId && payload.conversationId !== streamed.meta.conversationId)) throw new Error('Identity mismatch');
+      return { ...(streamed.result ? { kind: /** @type {const} */ ('ok'), result: streamed.result } : {
+        kind: /** @type {const} */ ('stream_error'), code: streamed.error?.code, message: streamed.error?.message,
+      }), status: 200, requestId: streamed.meta.requestId, conversationId: streamed.meta.conversationId,
+      contentType, omittedHistoryCount: omittedCount };
+    } catch {
+      return options.signal?.aborted ? { kind: 'aborted' } : { kind: 'protocol_error',
+        code: 'INVALID_STREAM', message: 'The response was incomplete or invalid. No assistant reply was recorded.',
+        requestId: headerRequestId, omittedHistoryCount: omittedCount };
+    }
   }
 
   /** @type {string} */
   let rawText = '';
   try {
-    rawText = await response.text();
+    rawText = await withAbort(response.text(), options.signal);
   } catch (bodyError) {
     if (isAbortError(bodyError, options.signal)) {
       return { kind: 'aborted' };
@@ -444,4 +454,186 @@ export async function sendChatRequest(payload, options = {}) {
     data: parsed,
     omittedHistoryCount: omittedCount,
   };
+}
+
+/** @typedef {import('../src/contracts.js').ChatEventPayloads} ChatEvents */
+/** @typedef {{signal?: AbortSignal, fetchImpl?: typeof fetch, maxHistoryItems?: number,
+ * maxBodyBytes?: number, onProgress?: (progress: ChatEvents['progress']) => void}} ChatOptions */
+
+/** A transport watchdog includes fetch and body reading, without extending the server deadline.
+ * @param {ChatRequestPayload} payload @param {ChatOptions} [options]
+ * @returns {Promise<ChatApiResult>} */
+export async function sendChatRequest(payload, options = {}) {
+  const controller = new AbortController();
+  const forward = () => controller.abort();
+  options.signal?.addEventListener('abort', forward, { once: true });
+  if (options.signal?.aborted) forward();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 30_000);
+  try {
+    return await withAbort(sendChatRequestInner(payload, { ...options, signal: controller.signal }), controller.signal);
+  } catch {
+    return timedOut ? { kind: 'network_error', code: 'STREAM_TIMEOUT',
+      message: 'The response timed out. No assistant reply was recorded.' } : { kind: 'aborted' };
+  } finally {
+    clearTimeout(timer); options.signal?.removeEventListener('abort', forward); controller.abort();
+  }
+}
+
+/** @template T @param {Promise<T>} work @param {AbortSignal} [signal] @returns {Promise<T>} */
+async function withAbort(work, signal) {
+  if (!signal) return work;
+  /** @type {() => void} */ let abort = () => {};
+  const cancelled = new Promise((_, reject) => {
+    abort = () => reject(new Error('Cancelled'));
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
+  try { return /** @type {T} */ (await Promise.race([work, cancelled])); }
+  finally { signal.removeEventListener('abort', abort); }
+}
+
+/** Browser validators deliberately mirror src/contracts.ts; parity fixtures test both.
+ * @param {any} v @param {string[]} required @param {string[]} [optional] */
+function fields(v, required, optional = []) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v) &&
+    required.every((k) => Object.hasOwn(v, k)) && Object.keys(v).every((k) => required.includes(k) || optional.includes(k));
+}
+/** @param {any} v @param {number} max */
+function textValue(v, max) { return typeof v === 'string' && v.length > 0 && v.length <= max; }
+/** @param {any} v */
+function safeId(v) { return textValue(v, 128) && /^[a-zA-Z0-9_-]+$/.test(v); }
+/** @param {any} value @param {boolean} [dateOnly] @param {boolean} [utcOnly] */
+function isoDate(value, dateOnly = false, utcOnly = false) {
+  if (typeof value !== 'string') return false;
+  const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.slice(0, 10));
+  if (!date) return false;
+  const year = Number(date[1]), month = Number(date[2]), day = Number(date[3]);
+  const days = [31, year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > days[month - 1]) return false;
+  if (dateOnly && value.length === 10) return true;
+  return /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(Z|[+-]([01]\d|2[0-3]):[0-5]\d)$/.test(value) &&
+    (!utcOnly || value.endsWith('Z'));
+}
+/** @param {any} value */
+function safeUrl(value) {
+  if (!textValue(value, 2048)) return false;
+  try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password; }
+  catch { return false; }
+}
+const issues = ['search_budget_exhausted', 'search_cutoff', 'search_unavailable', 'search_timeout', 'search_failed', 'search_invalid_results'];
+const errorCodes = ['REQUEST_TIMEOUT', 'MODEL_TIMEOUT', 'MODEL_FAILED', 'INVALID_MODEL_OUTPUT', 'INVALID_CITATION',
+  'CONTEXT_LIMIT', 'AGENT_LIMIT', 'CANCELLED', 'INTERNAL_ERROR'];
+/** @param {string} event @param {any} v */
+export function validChatEvent(event, v) {
+  switch (event) {
+    case 'meta': return fields(v, ['version', 'requestId', 'conversationId', 'answerMode']) &&
+      v.version === 'recall.chat.v1' && v.answerMode === 'final' && safeId(v.conversationId) &&
+      typeof v.requestId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v.requestId);
+    case 'progress': return fields(v, ['phase']) && v.phase === 'accepted' ||
+      fields(v, ['phase', 'call']) && v.phase === 'model_started' && Number.isInteger(v.call) && v.call >= 1 && v.call <= 3 ||
+      fields(v, ['phase', 'attempt']) && v.phase === 'search_started' && Number.isInteger(v.attempt) && v.attempt >= 1 && v.attempt <= 8;
+    case 'error': return fields(v, ['code', 'message']) && errorCodes.includes(v.code) && textValue(v.message, 256);
+    case 'done': return fields(v, ['outcome', 'messageId']) && ['completed', 'partial'].includes(v.outcome) && safeId(v.messageId) ||
+      fields(v, ['outcome']) && ['failed', 'cancelled'].includes(v.outcome);
+    case 'result': {
+      if (!fields(v, ['message', 'coverage', 'issues', 'sources', 'evidenceCheck']) ||
+          !fields(v.message, ['id', 'role', 'content', 'timestamp']) || !safeId(v.message.id) || v.message.role !== 'assistant' ||
+          !textValue(v.message.content, 16000) || !v.message.content.trim() || !isoDate(v.message.timestamp, false, true) ||
+          !['complete', 'partial'].includes(v.coverage) || v.evidenceCheck !== 'citation_ids_only' ||
+          !Array.isArray(v.issues) || v.issues.length > 6 || !v.issues.every((/** @type {any} */ i) => issues.includes(i)) ||
+          new Set(v.issues).size !== v.issues.length || (v.coverage === 'complete') !== (v.issues.length === 0) ||
+          !Array.isArray(v.sources) || v.sources.length > 24) return false;
+      const ids = new Set();
+      for (const s of v.sources) {
+        if (!fields(s, ['id', 'query', 'title', 'url', 'retrieved_at'], ['published_at', 'effective_at']) ||
+            !textValue(s.id, 128) || !/^S[1-9]\d*$/.test(s.id) || ids.has(s.id) ||
+            !textValue(s.query, 500) || !textValue(s.title, 500) || !safeUrl(s.url) || !isoDate(s.retrieved_at) ||
+            ('published_at' in s && !isoDate(s.published_at, true)) || ('effective_at' in s && !isoDate(s.effective_at, true))) return false;
+        ids.add(s.id);
+      }
+      return [...v.message.content.matchAll(/\[(S\d+)\]/g)].every((m) => ids.has(m[1]));
+    }
+    default: return false;
+  }
+}
+
+/** Reads the narrow recall.chat.v1 SSE dialect. A result is returned only after clean EOF.
+ * @param {Response} response @param {ChatOptions} [options]
+ * @returns {Promise<{meta: ChatEvents['meta'], result?: ChatEvents['result'], error?: ChatEvents['error']}>} */
+export async function readChatStream(response, options = {}) {
+  if (!response.body) throw new Error('Missing stream');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let bytes = 0, frameBytes = 0, previousFrameBytes = 0, line = '', event = '', data = '', hasData = false, afterCR = false;
+  let accepted = false, done = false, eof = false, hasEvent = false, modelCalls = 0, searchAttempts = 0;
+  /** @type {ChatEvents['meta'] | undefined} */ let meta;
+  /** @type {ChatEvents['result'] | undefined} */ let result;
+  /** @type {ChatEvents['error'] | undefined} */ let error;
+  const invalid = () => { throw new Error('Invalid chat stream'); };
+  const dispatch = () => {
+    if (!hasEvent && !hasData) return;
+    const value = JSON.parse(data);
+    if (done || !validChatEvent(event, value)) invalid();
+    if (!meta) { if (event !== 'meta') invalid(); meta = value; }
+    else if (event === 'progress' && !result && !error) {
+      if (value.phase === 'accepted') { if (accepted) invalid(); accepted = true; }
+      else {
+        if (!accepted) invalid();
+        if (value.phase === 'model_started') { if (value.call !== ++modelCalls) invalid(); }
+        else { if (!modelCalls || value.attempt !== ++searchAttempts) invalid(); }
+      }
+      options.onProgress?.(value);
+    } else if (event === 'result' && accepted && !result && !error) result = value;
+    else if (event === 'error' && accepted && !result && !error) error = value;
+    else if (event === 'done') {
+      if (result) {
+        if (value.messageId !== result.message.id || value.outcome !== (result.coverage === 'complete' ? 'completed' : 'partial')) invalid();
+      } else if (!error || value.outcome !== (error.code === 'CANCELLED' ? 'cancelled' : 'failed')) invalid();
+      done = true;
+    } else invalid();
+  };
+  const consumeLine = () => {
+    if (!line) { dispatch(); event = ''; data = ''; hasData = false; hasEvent = false; previousFrameBytes = frameBytes; frameBytes = 0; return; }
+    if (done) invalid();
+    if (line.startsWith(':')) return;
+    const colon = line.indexOf(':');
+    const field = colon < 0 ? line : line.slice(0, colon);
+    let value = colon < 0 ? '' : line.slice(colon + 1);
+    if (value.startsWith(' ')) value = value.slice(1);
+    if (field === 'event' && !hasEvent) { event = value; hasEvent = true; }
+    else if (field === 'data') { data += (hasData ? '\n' : '') + value; hasData = true; }
+    else invalid();
+  };
+  /** @param {string} text */
+  const consume = (text) => {
+    for (const char of text) {
+      if (afterCR && char === '\n') {
+        if ((frameBytes ? ++frameBytes : previousFrameBytes + 1) > 1_048_576) invalid();
+        afterCR = false; continue;
+      }
+      afterCR = false;
+      const point = /** @type {number} */ (char.codePointAt(0));
+      frameBytes += point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
+      if (frameBytes > 1_048_576) invalid();
+      if (char === '\r' || char === '\n') { consumeLine(); line = ''; afterCR = char === '\r'; }
+      else line += char;
+    }
+  };
+  try {
+    while (true) {
+      const chunk = await withAbort(reader.read(), options.signal);
+      if (options.signal?.aborted) invalid();
+      if (chunk.done) { eof = true; break; }
+      bytes += chunk.value.byteLength;
+      if (bytes > 2_097_152) invalid();
+      consume(decoder.decode(chunk.value, { stream: true }));
+    }
+    consume(decoder.decode());
+    if (!done || !meta || line || hasEvent || hasData) invalid();
+    return { meta: /** @type {ChatEvents['meta']} */ (meta), ...(result ? { result } : { error }) };
+  } finally {
+    if (!eof) void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }

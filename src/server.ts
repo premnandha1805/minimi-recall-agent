@@ -6,11 +6,17 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { ZodError } from 'zod';
 import { type AppConfig, loadConfig } from './config.js';
 import { createExecution, runWithSignal } from './execution.js';
+import { runAgent } from './agent.js';
+import { createModelProvider } from './model.js';
+import { createTavilySearch } from './search.js';
+import { SseResponse, agentErrorCode } from './sse.js';
 import {
   APP_NAME,
   APP_VERSION,
   type ApiErrorResponse,
   ChatRequestSchema,
+  CHAT_STREAM_VERSION,
+  ChatResultSchema,
   type HealthResponse,
   type ValidationErrorDetail,
 } from './contracts.js';
@@ -65,11 +71,15 @@ export interface BuildServerOptions {
   config?: AppConfig;
   logger?: boolean;
   logStream?: Writable;
+  /** Injectable network boundary for offline integration tests; factories still validate config. */
+  fetchImpl?: typeof fetch;
 }
 
 declare module 'fastify' {
   interface FastifyRequest {
     executionSignal: AbortSignal;
+    executionStartedAt: number;
+    sseResponse?: SseResponse;
   }
 }
 
@@ -179,8 +189,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   });
 
   app.decorateRequest('executionSignal');
+  app.decorateRequest('executionStartedAt', 0);
+  app.decorateRequest('sseResponse');
   app.addHook('onRequest', async (request, reply) => {
+    request.executionStartedAt = performance.now();
     const execution = createExecution(request.raw, reply.raw, config.REQUEST_DEADLINE_MS, () => {
+      if (request.sseResponse) { request.sseResponse.fail('REQUEST_TIMEOUT'); return; }
       if (!reply.sent && !reply.raw.destroyed && !request.raw.socket.destroyed) {
         reply.status(504).send(buildErrorResponse('REQUEST_TIMEOUT', 'Request deadline exceeded', request.id));
       }
@@ -259,17 +273,52 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         hasConversationId: Boolean(parsed.data.conversationId),
         historyCount: parsed.data.history?.length ?? 0,
       },
-      'Validated chat request; agent HTTP streaming integration is not yet implemented'
+      'Validated chat request'
     );
 
-    return reply.status(501).send(
-      buildErrorResponse(
-        'AGENT_NOT_IMPLEMENTED',
-        'Chat agent HTTP integration is not implemented yet. The internal core awaits the SSE contract and frontend integration.',
-        request.id,
-        { conversationId: parsed.data.conversationId }
-      )
-    );
+    request.executionSignal.throwIfAborted();
+    let provider;
+    let search;
+    try {
+      provider = createModelProvider(config, options.fetchImpl);
+      search = createTavilySearch(config, options.fetchImpl);
+    } catch {
+      return reply.status(503).send(buildErrorResponse('CHAT_NOT_CONFIGURED',
+        'Chat requires a supported Azure model configuration and Tavily credentials.', request.id,
+        { conversationId: parsed.data.conversationId }));
+    }
+    const conversationId = parsed.data.conversationId ?? randomUUID();
+    reply.hijack();
+    let stream: SseResponse | undefined;
+    try {
+      stream = new SseResponse(reply.raw, request.executionSignal, {
+        version: CHAT_STREAM_VERSION, requestId: request.id, conversationId, answerMode: 'final',
+      });
+      request.sseResponse = stream;
+      await stream.ready();
+      const owner = stream;
+      const result = await runAgent(parsed.data, {
+        provider: { contextWindowTokens: provider.contextWindowTokens, complete: async (input) => {
+          await owner.progress('model_started'); input.signal.throwIfAborted(); return provider.complete(input);
+        } },
+        search: async (query, input) => {
+          await owner.progress('search_started'); input.signal.throwIfAborted(); return search(query, input);
+        },
+        signal: request.executionSignal, startedAt: request.executionStartedAt,
+        deadlineMs: config.REQUEST_DEADLINE_MS,
+      });
+      if (result.reason === 'answer') {
+        stream.complete(ChatResultSchema.parse({
+          message: { id: randomUUID(), role: 'assistant', content: result.answer, timestamp: new Date().toISOString() },
+          coverage: result.status === 'completed' ? 'complete' : 'partial', issues: result.issues,
+          sources: result.sources.map(({ text: _text, ...metadata }) => metadata), evidenceCheck: 'citation_ids_only',
+        }));
+      } else stream.fail(agentErrorCode(result.reason));
+    } catch {
+      if (stream) stream.fail('INTERNAL_ERROR');
+      else reply.raw.destroy();
+    }
+    return reply;
   });
 
   app.setNotFoundHandler(async (request, reply) => {

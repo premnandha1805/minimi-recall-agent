@@ -25,6 +25,7 @@ export { MAX_MESSAGE_CHARS };
  * @property {string} id
  * @property {'loading'} kind
  * @property {string} messageText
+ * @property {string} [progress]
  */
 
 /**
@@ -47,6 +48,7 @@ export { MAX_MESSAGE_CHARS };
  * @property {'assistant'} kind
  * @property {string} text
  * @property {string} timestamp
+ * @property {import('../src/contracts.js').ChatResult} [result]
  */
 
 /**
@@ -583,7 +585,7 @@ export function createChatApp(options = {}) {
     dots.appendChild(el(doc, 'span', 'loading-dot'));
     titleRow.appendChild(dots);
 
-    titleRow.appendChild(el(doc, 'span', 'loading-label', 'Sending request to Recall Agent…'));
+    titleRow.appendChild(el(doc, 'span', 'loading-label', entry.progress || 'Sending request to Recall Agent…'));
     top.appendChild(titleRow);
 
     const cancelBtn = el(doc, 'button', 'btn-danger-ghost', 'Cancel request');
@@ -790,7 +792,48 @@ export function createChatApp(options = {}) {
 
     const answerCard = el(doc, 'div', 'notice-card');
     answerCard.appendChild(el(doc, 'div', 'notice-accent-bar is-info'));
-    answerCard.appendChild(el(doc, 'div', 'assistant-answer-card', entry.text));
+    const content = el(doc, 'div', 'assistant-answer-card');
+    const sources = new Map((entry.result?.sources ?? []).map((s) => [s.id, s]));
+    let cursor = 0;
+    for (const match of entry.text.matchAll(/\[(S\d+)\]/g)) {
+      content.appendChild(doc.createTextNode(entry.text.slice(cursor, match.index)));
+      const source = sources.get(match[1]);
+      if (source) {
+        const link = el(doc, 'a', 'citation-link', match[0]);
+        link.href = source.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        link.title = source.title; content.appendChild(link);
+      } else content.appendChild(doc.createTextNode(match[0]));
+      cursor = match.index + match[0].length;
+    }
+    content.appendChild(doc.createTextNode(entry.text.slice(cursor)));
+    answerCard.appendChild(content);
+    if (entry.result?.coverage === 'partial') {
+      const labels = {
+        search_budget_exhausted: 'Search budget reached', search_cutoff: 'Search time window ended',
+        search_unavailable: 'Search unavailable', search_timeout: 'Search timed out',
+        search_failed: 'Search failed', search_invalid_results: 'Search returned unusable evidence',
+      };
+      answerCard.appendChild(el(doc, 'p', 'research-limitation',
+        `Partial research: ${entry.result.issues.map((issue) => labels[issue]).join('; ')}. This answer is not included in subsequent conversation context.`));
+    }
+    if (entry.result) {
+      const disclosure = el(doc, 'details', 'answer-sources');
+      disclosure.appendChild(el(doc, 'summary', '', `Sources (${sources.size})`));
+      disclosure.appendChild(el(doc, 'p', '', 'Citation IDs checked only. Quotations and factual claims have not been verified.'));
+      for (const source of sources.values()) {
+        const item = el(doc, 'div', 'source-entry');
+        const link = el(doc, 'a', '', `[${source.id}] ${source.title}`);
+        link.href = source.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        item.appendChild(link);
+        item.appendChild(el(doc, 'p', '', source.url));
+        item.appendChild(el(doc, 'p', '', `Query: ${source.query}`));
+        item.appendChild(el(doc, 'p', '', `Retrieved: ${source.retrieved_at}`));
+        if (source.published_at) item.appendChild(el(doc, 'p', '', `Published: ${source.published_at}`));
+        if (source.effective_at) item.appendChild(el(doc, 'p', '', `Effective: ${source.effective_at}`));
+        disclosure.appendChild(item);
+      }
+      answerCard.appendChild(disclosure);
+    }
     article.appendChild(answerCard);
 
     return article;
@@ -923,6 +966,18 @@ export function createChatApp(options = {}) {
         fetchImpl,
         maxHistoryItems,
         maxBodyBytes,
+        onProgress: (progress) => {
+          if (requestState.controller.signal.aborted || activeRequest?.requestToken !== requestToken) return;
+          const entry = targetSession.entries.find((item) => item.id === loadingEntryId);
+          if (entry?.kind !== 'loading') return;
+          entry.progress = progress.phase === 'accepted' ? 'Request accepted' :
+            progress.phase === 'model_started' ? 'Waiting for the model response…' : 'Searching the web…';
+          if (activeSession.id === targetSession.id) {
+            const label = messageListEl?.querySelector(`[data-entry-id="${loadingEntryId}"] .loading-label`);
+            if (label) label.textContent = entry.progress;
+            announce(entry.progress);
+          }
+        },
       },
     );
 
@@ -948,7 +1003,21 @@ export function createChatApp(options = {}) {
       }
     };
 
-    if (result.kind === 'not_implemented') {
+    if (result.kind === 'ok' && result.result && !requestState.controller.signal.aborted) {
+      const answer = result.result;
+      replaceEntry({ id: loadingEntryId, kind: 'assistant', text: answer.message.content,
+        timestamp: answer.message.timestamp, result: answer });
+      if (answer.coverage === 'complete' && !targetSession.history.some((item) => item.id === answer.message.id)) {
+        targetSession.history.push({ ...answer.message });
+      }
+      if (shouldAnnounceAndFocus) announce(answer.coverage === 'complete' ? 'Answer received.' : 'Answer received with partial research.');
+    } else if (result.kind === 'stream_error' || result.kind === 'protocol_error') {
+      replaceEntry({ id: loadingEntryId, kind: 'notice', tone: 'error', title: 'Response could not be completed',
+        subtitle: 'No assistant reply recorded', pill: 'Response error',
+        body: result.message || 'The response was incomplete or invalid.', retryPrompt: promptText, retryHistory: historySnapshot,
+        telemetry: { code: result.code, requestId: result.requestId, conversationId: targetSession.id } });
+      if (shouldAnnounceAndFocus) announce('Response failed. No assistant reply recorded.');
+    } else if (result.kind === 'not_implemented') {
       replaceEntry({
         id: loadingEntryId,
         kind: 'notice',
@@ -1061,8 +1130,7 @@ export function createChatApp(options = {}) {
         announce(`Server error HTTP ${status}.`);
       }
     } else {
-      // No final 200 JSON or SSE chat response contract is active in this build;
-      // never fabricate assistant text or insert unvalidated responses into history.
+      // Unsupported responses never become assistant text or conversation history.
       const status = result.status ?? 200;
       replaceEntry({
         id: loadingEntryId,

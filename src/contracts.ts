@@ -92,3 +92,59 @@ export interface ApiErrorResponse {
   conversationId?: string;
 }
 
+export const CHAT_STREAM_VERSION = 'recall.chat.v1';
+export const MAX_SSE_FRAME_BYTES = 1_048_576;
+export const MAX_SSE_STREAM_BYTES = 2_097_152;
+const SafeIdSchema = z.string().min(1).max(128).regex(CONVERSATION_ID_PATTERN);
+const EvidenceDateSchema = z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
+export const ResearchIssueSchema = z.enum(['search_budget_exhausted', 'search_cutoff',
+  'search_unavailable', 'search_timeout', 'search_failed', 'search_invalid_results']);
+export const StreamErrorCodeSchema = z.enum(['REQUEST_TIMEOUT', 'MODEL_TIMEOUT', 'MODEL_FAILED',
+  'INVALID_MODEL_OUTPUT', 'INVALID_CITATION', 'CONTEXT_LIMIT', 'AGENT_LIMIT', 'CANCELLED', 'INTERNAL_ERROR']);
+export type StreamErrorCode = z.infer<typeof StreamErrorCodeSchema>;
+export const SourceMetadataSchema = z.strictObject({
+  id: z.string().max(128).regex(/^S[1-9]\d*$/),
+  query: z.string().min(1).max(500),
+  title: z.string().min(1).max(500),
+  url: z.string().max(2048).url().refine((value) => {
+    try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password; }
+    catch { return false; }
+  }),
+  retrieved_at: z.iso.datetime({ offset: true }),
+  published_at: EvidenceDateSchema.optional(),
+  effective_at: EvidenceDateSchema.optional(),
+});
+export const ChatResultSchema = z.strictObject({
+  message: z.strictObject({ id: SafeIdSchema, role: z.literal('assistant'),
+    content: z.string().max(MAX_MESSAGE_CHARS).refine((s) => s.trim().length > 0),
+    timestamp: z.iso.datetime() }),
+  coverage: z.enum(['complete', 'partial']),
+  issues: z.array(ResearchIssueSchema).max(6),
+  sources: z.array(SourceMetadataSchema).max(24),
+  evidenceCheck: z.literal('citation_ids_only'),
+}).superRefine((value, ctx) => {
+  const ids = new Set(value.sources.map((s) => s.id));
+  if (ids.size !== value.sources.length || new Set(value.issues).size !== value.issues.length ||
+      (value.coverage === 'complete') !== (value.issues.length === 0) ||
+      [...value.message.content.matchAll(/\[(S\d+)\]/g)].some((m) => !ids.has(m[1]))) {
+    ctx.addIssue({ code: 'custom', message: 'Invalid evidence registry or coverage' });
+  }
+});
+export const ChatEventSchemas = {
+  meta: z.strictObject({ version: z.literal(CHAT_STREAM_VERSION), requestId: z.uuid(),
+    conversationId: SafeIdSchema, answerMode: z.literal('final') }),
+  progress: z.discriminatedUnion('phase', [
+    z.strictObject({ phase: z.literal('accepted') }),
+    z.strictObject({ phase: z.literal('model_started'), call: z.number().int().min(1).max(3) }),
+    z.strictObject({ phase: z.literal('search_started'), attempt: z.number().int().min(1).max(8) }),
+  ]),
+  result: ChatResultSchema,
+  error: z.strictObject({ code: StreamErrorCodeSchema, message: z.string().min(1).max(256) }),
+  done: z.union([
+    z.strictObject({ outcome: z.enum(['completed', 'partial']), messageId: SafeIdSchema }),
+    z.strictObject({ outcome: z.enum(['failed', 'cancelled']) }),
+  ]),
+};
+export type ChatEventPayloads = { [K in keyof typeof ChatEventSchemas]: z.infer<(typeof ChatEventSchemas)[K]> };
+export type ChatResult = ChatEventPayloads['result'];
+

@@ -40,7 +40,7 @@ export interface HealthStatusResult {
 }
 
 export interface ChatApiResult {
-  kind: 'not_implemented' | 'http_error' | 'network_error' | 'aborted' | 'unsupported_response' | 'ok';
+  kind: 'not_implemented' | 'http_error' | 'network_error' | 'aborted' | 'unsupported_response' | 'protocol_error' | 'stream_error' | 'ok';
   status?: number;
   code?: string;
   message?: string;
@@ -50,6 +50,7 @@ export interface ChatApiResult {
   contentType?: string;
   rawResponse?: Response;
   data?: unknown;
+  result?: import('../src/contracts.js').ChatResult;
   omittedHistoryCount?: number;
 }
 
@@ -77,5 +78,14 @@ export function sendChatRequest(
     fetchImpl?: typeof fetch;
     maxHistoryItems?: number;
     maxBodyBytes?: number;
+    onProgress?: (progress: import('../src/contracts.js').ChatEventPayloads['progress']) => void;
   },
 ): Promise<ChatApiResult>;
+
+export function validChatEvent(event: string, value: unknown): boolean;
+export function readChatStream(response: Response, options?: {
+  signal?: AbortSignal;
+  onProgress?: (progress: import('../src/contracts.js').ChatEventPayloads['progress']) => void;
+}): Promise<{ meta: import('../src/contracts.js').ChatEventPayloads['meta'];
+  result?: import('../src/contracts.js').ChatResult;
+  error?: import('../src/contracts.js').ChatEventPayloads['error'] }>;

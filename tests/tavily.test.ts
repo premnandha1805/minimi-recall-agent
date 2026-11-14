@@ -301,12 +301,12 @@ describe('Tavily through the existing agent and budget owner', () => {
     pending.reject(new Error('late')); await flush(); expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('keeps /api/chat at 501 with no automatic Tavily request even when a key is configured', async () => {
+  it('requires a supported model before executing Tavily', async () => {
     const fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal('fetch', fetchMock);
     const server = buildServer({ config: loadConfig({ TAVILY_API_KEY: KEY }), logger: false });
     try {
       const response = await server.inject({ method: 'POST', url: '/api/chat', payload: { message: 'Search now' } });
-      expect(response.statusCode).toBe(501); expect(response.json().error.code).toBe('AGENT_NOT_IMPLEMENTED');
+      expect(response.statusCode).toBe(503); expect(response.json().error.code).toBe('CHAT_NOT_CONFIGURED');
       expect(fetchMock).not.toHaveBeenCalled();
     } finally { await server.close(); }
   });

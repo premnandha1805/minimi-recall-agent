@@ -134,13 +134,13 @@ describe('Azure OpenAI v1 adapter (mock HTTP only)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves the existing HTTP 501 contract even with a configured model; no hidden live call', async () => {
+  it('requires Tavily before executing a configured model; no hidden live call', async () => {
     const fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal('fetch', fetchMock);
     const app = buildServer({ logger: false, config: loadConfig(azureEnv) });
     try {
       const response = await app.inject({ method: 'POST', url: '/api/chat', payload: { conversationId: 'feature4', message: 'Hello' } });
-      expect(response.statusCode).toBe(501);
-      expect(response.json()).toMatchObject({ error: { code: 'AGENT_NOT_IMPLEMENTED' }, conversationId: 'feature4', requestId: response.headers['x-request-id'] });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({ error: { code: 'CHAT_NOT_CONFIGURED' }, conversationId: 'feature4', requestId: response.headers['x-request-id'] });
       expect(response.json()).not.toHaveProperty('answer'); expect(response.headers['content-type']).toContain('application/json');
       expect(fetchMock).not.toHaveBeenCalled();
     } finally { await app.close(); }

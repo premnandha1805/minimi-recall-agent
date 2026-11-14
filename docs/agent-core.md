@@ -1,9 +1,11 @@
 # Feature 4: internal agent core
 
 `runAgent(request, { provider, signal, search? })` is an internal TypeScript API.
-`createModelProvider(loadConfig())` selects the configured adapter. There is no new
-HTTP assistant schema or SSE format. `POST /api/chat` still returns the existing
-501 error envelope; merely setting a key does not trigger model calls.
+`createModelProvider(loadConfig())` selects the configured adapter. `POST /api/chat`
+now uses [recall.chat.v1](chat-sse.md) to invoke this unchanged core. The HTTP layer
+requires both supported Azure and Tavily configuration before starting work.
+Missing configuration returns sanitized HTTP 503 without model calls. Startup,
+imports and tests do not initiate live API calls.
 
 The loop uses at most three model requests: up to two tool-call rounds followed
 by synthesis with tools disabled. One round is one model response, including all
@@ -66,14 +68,14 @@ the Azure label alone does not establish compatibility or free/student eligibili
 
 ## Remaining integration
 
-The frozen design's target architecture is unchanged. This feature deliberately
-does not complete its SSE/live-search gate: an agreed SSE event contract, model
-streaming, frontend consumption, wiring the Tavily adapter into HTTP execution,
-persistent history/date anchoring, and
-quote verification still need implementation. Do not expose the internal result
-as an invented HTTP 200 payload. No live credentials/quota or live latency have
-been verified. Existing environment defaults do not imply an implemented Gemini
-adapter. Selecting an unsupported provider fails explicitly in the core factory.
+The frozen design's target architecture is unchanged. HTTP/browser integration now
+transports factual progress and a validated final/partial answer, not model tokens.
+True token streaming remains outstanding, along with persistent memory, temporal
+recall/date anchoring and quote/claim verification. Only completed answers enter
+subsequent browser request history; partial research stays visible with limitations.
+No live compatibility, credentials/quota or latency have been verified. Existing
+environment defaults do not imply an implemented Gemini adapter. Selecting an
+unsupported provider fails explicitly in the core factory and HTTP preflight.
 
 Offline verification (PowerShell):
 

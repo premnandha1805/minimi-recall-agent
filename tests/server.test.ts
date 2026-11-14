@@ -42,7 +42,7 @@ describe('HTTP server and Chat API foundation', () => {
     expect(Number.isNaN(Date.parse(body.timestamp))).toBe(false);
   });
 
-  it('POST /api/chat accepts valid minimal payload and returns explicit 501 not-implemented', async () => {
+  it('POST /api/chat accepts valid minimal payload and returns explicit 503 without configuration', async () => {
     const app = createTestServer();
 
     const response = await app.inject({
@@ -53,10 +53,10 @@ describe('HTTP server and Chat API foundation', () => {
       },
     });
 
-    expect(response.statusCode).toBe(501);
+    expect(response.statusCode).toBe(503);
     const body = response.json();
-    expect(body.error.code).toBe('AGENT_NOT_IMPLEMENTED');
-    expect(body.error.message).toMatch(/not implemented/i);
+    expect(body.error.code).toBe('CHAT_NOT_CONFIGURED');
+    expect(body.error.message).toMatch(/configuration/i);
     expect(typeof body.requestId).toBe('string');
     expect(body.conversationId).toBeUndefined();
   });
@@ -90,10 +90,10 @@ describe('HTTP server and Chat API foundation', () => {
       },
     });
 
-    expect(response.statusCode).toBe(501);
+    expect(response.statusCode).toBe(503);
     expect(response.headers['x-request-id']).not.toBe('req-custom-123');
     const body = response.json();
-    expect(body.error.code).toBe('AGENT_NOT_IMPLEMENTED');
+    expect(body.error.code).toBe('CHAT_NOT_CONFIGURED');
     expect(body.requestId).toBe(response.headers['x-request-id']);
     expect(body.conversationId).toBe('crm-shortlist_2026');
   });
