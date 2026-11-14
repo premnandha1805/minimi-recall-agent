@@ -36,7 +36,7 @@ describe('bounded, privacy-safe agent stage observations (offline)', () => {
       { stage: 'model_call', call: 1, durationMs: 75, outcome: 'success',
         usage: { inputTokens: 123, completionTokens: 20, reasoningTokens: 0 } },
       { stage: 'final_synthesis', call: 1, durationMs: 75, outcome: 'success' },
-      { stage: 'agent', durationMs: 75, outcome: 'success', agentStatus: 'completed', modelCalls: 1,
+      { stage: 'agent', durationMs: 75, outcome: 'success', agentStatus: 'completed', stopReason: 'answer', modelCalls: 1,
         searchCalls: 0, sourceCount: 0, uniqueSourceUrls: 0 },
     ]);
     expect(vi.getTimerCount()).toBe(0);
@@ -85,6 +85,8 @@ describe('bounded, privacy-safe agent stage observations (offline)', () => {
     await vi.advanceTimersByTimeAsync(elapsed);
     if (reason === 'cancelled') controller.abort(new Error('PRIVATE abort reason'));
     expect((await run).reason).toBe(reason);
+    expect(log.events.at(-1)?.stopReason).toBe(reason);
+    expect(log.events.at(-1)).not.toHaveProperty('validationCategory');
     const outcome = reason === 'cancelled' ? 'abort' : 'timeout';
     expect(log.events.map((e) => [e.stage, e.outcome, e.durationMs])).toEqual([
       ['model_call', outcome, elapsed], ['agent', outcome, elapsed],

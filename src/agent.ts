@@ -3,7 +3,7 @@ import { ChatRequestSchema, type ChatRequest } from './contracts.js';
 import { createDeadlineScope, ExecutionTimeoutError, runWithSignal } from './execution.js';
 import { contextFits, ModelResponseSchema, type ModelMessage, type ModelProvider, type ModelResponse } from './model.js';
 import { AGENT_SYSTEM_PROMPT } from './prompts.js';
-import { abortOutcome, observeStage, sourceCounts, tokenUsage, type StageObserver, type StageOutcome } from './observability.js';
+import { abortOutcome, observeStage, sourceCounts, tokenUsage, type StageObserver, type StageOutcome, type ValidationCategory } from './observability.js';
 import { SEARCH_LIMITS, SearchArgumentsSchema, SearchSession, WEB_SEARCH_TOOL, type Source, type WebSearch } from './search.js';
 
 export const AGENT_LIMITS = Object.freeze({ deadlineMs: 25_000, modelTimeoutMs: 10_000,
@@ -43,10 +43,12 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
   const agentStartedAt = performance.now();
   const result: AgentResult = { status: 'failed', reason: 'invalid_request', sources: [], issues: [],
     stats: { modelCalls: 0, searchRounds: 0, searchRequests: 0, reservedOutputTokens: 0 }, usage: [] };
+  let validationCategory: ValidationCategory | undefined;
   const observeTotal = () => observeStage(options.observe, agentStartedAt, {
     stage: 'agent', outcome: result.reason === 'answer' ? 'success' :
       ['model_timeout', 'deadline'].includes(result.reason) ? 'timeout' : result.reason === 'cancelled' ? 'abort' : 'failure',
     agentStatus: result.status, modelCalls: result.stats.modelCalls, searchCalls: result.stats.searchRequests,
+    stopReason: result.reason, ...(validationCategory ? { validationCategory } : {}),
     ...sourceCounts(result.sources),
   });
   const limits = RunOptionsSchema.safeParse({ deadlineMs: options.deadlineMs,
@@ -77,6 +79,10 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
     if (answer !== undefined) result.answer = answer;
     return result;
   };
+  const reject = (reason: AgentStopReason, category: ValidationCategory): AgentResult => {
+    validationCategory = category;
+    return finish(reason);
+  };
   try {
     for (let step = 0; step < AGENT_LIMITS.modelCalls; step++) {
       deadline.signal.throwIfAborted();
@@ -100,7 +106,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
         });
         deadline.signal.throwIfAborted();
         const validated = ModelResponseSchema.safeParse(raw);
-        if (!validated.success) return finish('invalid_response');
+        if (!validated.success) return reject('invalid_response', 'response_schema');
         response = validated.data;
         // Success here means a valid provider response, not factual/citation verification.
         modelOutcome = 'success';
@@ -124,28 +130,28 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       }
       if (response.usage) {
         result.usage.push(response.usage);
-        if (response.usage.outputTokens > maxOutputTokens) return finish('output_limit');
+        if (response.usage.outputTokens > maxOutputTokens) return reject('output_limit', 'output_limit');
       }
-      if (response.finishReason === 'content_filter') return finish('content_filter');
-      if (response.finishReason === 'length') return finish('output_limit');
+      if (response.finishReason === 'content_filter') return reject('content_filter', 'content_filter');
+      if (response.finishReason === 'length') return reject('output_limit', 'output_limit');
       if (!response.toolCalls.length) {
-        if (response.finishReason !== 'stop') return finish('invalid_response');
-        if (!response.text.trim()) return finish('empty_output');
+        if (response.finishReason !== 'stop') return reject('invalid_response', 'finish_tool_mismatch');
+        if (!response.text.trim()) return reject('empty_output', 'empty_text');
         const knownIds = new Set(search.sources.map((source) => source.id));
         if ([...response.text.matchAll(/\[(S\d+)\]/g)].some((match) => !knownIds.has(match[1]))) return finish('invalid_citation');
         return finish('answer', response.text);
       }
       if (!tools.length) return finish('round_limit');
-      if (response.finishReason !== 'tool_calls') return finish('invalid_response');
+      if (response.finishReason !== 'tool_calls') return reject('invalid_response', 'finish_tool_mismatch');
       const groups: string[][] = [];
       for (const call of response.toolCalls) {
-        if (call.name !== 'web_search') return finish('unsupported_tool');
-        if (seenCallIds.has(call.id)) return finish('repeated_tool_call');
+        if (call.name !== 'web_search') return reject('unsupported_tool', 'unsupported_tool');
+        if (seenCallIds.has(call.id)) return reject('repeated_tool_call', 'repeated_tool_id');
         seenCallIds.add(call.id);
         let args: unknown;
-        try { args = JSON.parse(call.arguments); } catch { return finish('invalid_tool_call'); }
+        try { args = JSON.parse(call.arguments); } catch { return reject('invalid_tool_call', 'tool_arguments_json'); }
         const valid = SearchArgumentsSchema.safeParse(args);
-        if (!valid.success) return finish('invalid_tool_call');
+        if (!valid.success) return reject('invalid_tool_call', 'tool_arguments_schema');
         groups.push(valid.data.queries);
       }
       messages.push({ role: 'assistant', content: response.text, toolCalls: response.toolCalls });

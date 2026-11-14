@@ -1,5 +1,11 @@
 import { ExecutionTimeoutError } from './execution.js';
 import type { ModelResponse } from './model.js';
+import type { AgentStopReason } from './agent.js';
+
+/** Fixed rejection labels only; never include validation messages or model data. */
+export type ValidationCategory = 'response_schema' | 'empty_text' | 'finish_tool_mismatch' |
+  'tool_arguments_json' | 'tool_arguments_schema' | 'unsupported_tool' |
+  'repeated_tool_id' | 'output_limit' | 'content_filter';
 
 export type StageOutcome = 'success' | 'timeout' | 'abort' | 'failure';
 export interface TokenUsage {
@@ -22,6 +28,9 @@ export interface StageObservation {
   sourceCount?: number;
   uniqueSourceUrls?: number;
   agentStatus?: 'completed' | 'partial' | 'failed' | 'cancelled';
+  /** Terminal agent record only. Success uses answer with no validationCategory. */
+  stopReason?: AgentStopReason;
+  validationCategory?: ValidationCategory;
   usage?: TokenUsage;
 }
 export type StageObserver = (event: StageObservation) => void;
