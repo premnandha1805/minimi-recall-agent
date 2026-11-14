@@ -1498,3 +1498,11 @@ textarea:focus-visible,
     transition-duration: 0.01ms !important;
   }
 }
+/* Answer evidence uses the existing cards and typography; no layout replacement. */
+.assistant-answer-card { white-space: pre-wrap; overflow-wrap: anywhere; }
+.citation-link, .answer-sources a { color: inherit; text-decoration: underline; }
+.answer-sources { margin-top: 1rem; font-size: .875rem; overflow-wrap: anywhere; }
+.answer-sources summary { cursor: pointer; }
+.source-entry { margin-top: .75rem; }
+.source-entry p { margin: .25rem 0; }
+.research-limitation { padding: .75rem; border-left: 3px solid #b7791f; }

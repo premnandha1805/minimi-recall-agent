@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { result as chatResult, source as chatSource, meta as chatMeta, streamText } from './fixtures/chat-stream.js';
 import {
   MAX_HISTORY_CONTENT_CHARS as CONTRACT_MAX_HISTORY_CONTENT_CHARS,
   MAX_HISTORY_ITEMS as CONTRACT_MAX_HISTORY_ITEMS,
@@ -488,17 +489,68 @@ describe('Recall Agent Chat UI (public/index.html + app.js + api.js)', () => {
     expect(errResult.requestId).toBe('req-400');
 
     const sseFetch = vi.fn<typeof fetch>(async () => {
-      return new Response('event: status\ndata: {}\n\n', {
+      return new Response(streamText(), {
         status: 200,
-        headers: { 'Content-Type': 'text/event-stream', 'X-Request-Id': 'req-sse' },
+        headers: { 'Content-Type': 'text/event-stream', 'X-Request-Id': chatMeta.requestId },
       });
     });
 
     const sseResult = await sendChatRequest({ message: 'stream test' }, { fetchImpl: sseFetch });
     expect(sseResult.kind).toBe('ok');
     expect(sseResult.status).toBe(200);
-    expect(sseResult.requestId).toBe('req-sse');
+    expect(sseResult.requestId).toBe(chatMeta.requestId);
     expect(sseResult.contentType).toContain('text/event-stream');
+  });
+
+  it.each(['complete', 'partial'] as const)('renders real %s answers safely and applies history policy', async (coverage) => {
+    const bodies: Array<{ conversationId: string; history?: Array<{ role: string; content: string }> }> = [];
+    const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+      if (url === '/health') return new Response('{"status":"ok"}');
+      const body = JSON.parse(String(init?.body)); bodies.push(body);
+      return new Response(streamText({ ...chatResult,
+        message: { ...chatResult.message, content: '<script>alert(1)</script> Evidence [S1]' },
+        sources: [chatSource], coverage, issues: coverage === 'partial' ? ['search_failed'] : [],
+      }).replace(chatMeta.conversationId, body.conversationId), { headers: { 'content-type': 'text/event-stream' } });
+    });
+    const app = await mountApp(fetchMock);
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+    for (const prompt of ['first', 'followup']) {
+      input.value = prompt; form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await flushMicrotasks();
+    }
+    const answer = document.querySelector('.assistant-answer-card')!;
+    expect(answer.textContent).toContain('<script>alert(1)</script>'); expect(answer.querySelector('script')).toBeNull();
+    const link = answer.querySelector('a')!; expect(link.href).toBe(chatSource.url); expect(link.rel).toContain('noopener');
+    expect(document.querySelector('.answer-sources')?.textContent).toContain(chatSource.title);
+    expect(document.querySelector('.answer-sources img')).toBeNull();
+    expect(document.querySelector('.answer-sources')?.textContent).not.toContain('Effective:');
+    expect(Boolean(document.querySelector('.research-limitation'))).toBe(coverage === 'partial');
+    expect(bodies[1].history?.some((h) => h.role === 'assistant')).toBe(coverage === 'complete');
+    expect(app.getActiveSession().history.filter((h) => h.role === 'assistant')).toHaveLength(coverage === 'complete' ? 1 : 0);
+  });
+
+  it('does not record an answer before completion and clean EOF, or after cancellation', async () => {
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+      if (url === '/health') return new Response('{"status":"ok"}');
+      const body = JSON.parse(String(init?.body));
+      return new Response(new ReadableStream({ start(controller) {
+        streamController = controller;
+        controller.enqueue(new TextEncoder().encode(streamText().replace(chatMeta.conversationId, body.conversationId)));
+      } }), { headers: { 'content-type': 'text/event-stream' } });
+    });
+    const app = await mountApp(fetchMock);
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement;
+    input.value = 'hello'; document.getElementById('composer-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+    expect(app.getActiveSession().history.some((h) => h.role === 'assistant')).toBe(false);
+    expect(document.querySelector('.assistant-answer-card')).toBeNull();
+    (document.querySelector('[data-action="cancel-request"]') as HTMLButtonElement).click();
+    await flushMicrotasks();
+    expect(app.getActiveSession().history.some((h) => h.role === 'assistant')).toBe(false);
+    expect(document.getElementById('message-list')?.textContent).toContain('Request cancelled');
+    expect(streamController).toBeDefined();
   });
 
   it('12. makes compact/collapsed sidebar inert, synchronizes aria-expanded, and manages focus across open, Escape, New Chat, and resize', async () => {

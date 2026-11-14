@@ -349,7 +349,7 @@ describe('HTTP safeguards', () => {
     try {
       for (const supplied of [undefined, '<script>bad</script>', ['a', 'b'], 'x'.repeat(8000), 'reused', 'reused']) {
         const result = await app.inject({ method: 'POST', url: '/api/chat', payload: { message: 'ok' }, headers: supplied === undefined ? {} : { 'x-request-id': supplied } });
-        expect(result.statusCode).toBe(501);
+        expect(result.statusCode).toBe(503);
         const id: string = result.json().requestId;
         expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
         expect(result.headers['x-request-id']).toBe(id);

@@ -2,10 +2,15 @@
 
 The backend exports `createTavilySearch(config, fetchImpl?)` from `src/search.ts`.
 It returns the existing `WebSearch` function; inject it as `runAgent`'s `search`
-option. Without a configured key, omit that option so the core reports unavailable
-search. Constructing the adapter without a key throws `NOT_CONFIGURED`. Server
-startup requires no credentials, and `/api/chat` retains its honest HTTP 501 response.
-Nothing automatically calls Tavily on startup, import, or during `npm test`.
+option. The internal core can still report unavailable search when that option is
+omitted, but **HTTP chat now requires both supported Azure configuration and valid
+local Tavily configuration before execution**, even for a no-search answer.
+Missing configuration returns sanitized HTTP 503 with zero model/search requests.
+Constructing the adapter without a key throws `NOT_CONFIGURED`. Credential-free
+startup remains possible under existing environment rules; explicitly choosing
+Azure still requires its fields at startup. No quota/authentication probe is made.
+Nothing calls Tavily on startup, import, or during `npm test`. A configured chat
+request can call it through the core. See [the SSE contract](chat-sse.md).
 
 ## Verified request contract
 
@@ -111,6 +116,8 @@ git diff --check
 git status --short --branch
 ```
 
-Remaining work: live provider verification, designated SSE/HTTP/frontend
-integration, memory/date anchoring and quote/claim verification. This feature does
-not complete the full live chat acceptance gate or establish source claim support.
+HTTP/frontend integration uses SSE progress plus a final answer, **not token
+streaming**. True token streaming, live provider compatibility and latency
+verification, memory/temporal recall and quote/claim verification remain outstanding.
+Citation-ID checks do not establish factual verification. This stage does not
+complete the full live chat acceptance gate.
