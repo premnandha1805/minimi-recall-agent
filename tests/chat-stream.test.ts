@@ -1,3 +1,7 @@
+import { rm } from 'node:fs/promises';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { request as httpRequest } from 'node:http';
 import type { FastifyInstance } from 'fastify';
@@ -7,8 +11,10 @@ import { readChatStream } from '../public/api.js';
 import { azureEnv, wire, toolWire, json } from './fixtures/chat-stream.js';
 
 const servers: FastifyInstance[] = [];
+const memoryDirectories: string[] = [];
 function server(fetchImpl: typeof fetch, env = {}) {
-  const app = buildServer({ config: loadConfig({ ...azureEnv, ...env }), logger: false, fetchImpl });
+  const memoryDirectory = mkdtempSync(join(tmpdir(), 'recall-http-offline-')); memoryDirectories.push(memoryDirectory);
+  const app = buildServer({ memoryDirectory, config: loadConfig({ ...azureEnv, ...env }), logger: false, fetchImpl });
   servers.push(app); return app;
 }
 const post = (app: FastifyInstance, payload: unknown = { message: 'hello' }) => app.inject({ method: 'POST', url: '/api/chat', payload: payload as object });
@@ -16,7 +22,7 @@ async function parse(app: FastifyInstance) {
   const reply = await post(app);
   expect(reply.statusCode).toBe(200);
   expect(reply.headers['content-type']).toContain('text/event-stream');
-  expect(reply.headers['cache-control']).toBe('no-cache, no-transform');
+  expect(reply.headers['cache-control']).toBe('no-cache, no-transform, no-store');
   const parsed = await readChatStream(new Response(reply.body));
   expect(parsed.meta.requestId).toBe(reply.headers['x-request-id']);
   return { reply, ...parsed };
@@ -24,6 +30,7 @@ async function parse(app: FastifyInstance) {
 afterEach(async () => {
   vi.useRealTimers();
   for (const app of servers.splice(0)) { app.server.closeAllConnections(); await app.close(); }
+  for (const directory of memoryDirectories.splice(0)) await rm(directory, { recursive: true, force: true });
 });
 describe('HTTP → unchanged core → real adapters with mocked fetch', () => {
   it('answers without search and emits only factual model progress', async () => {

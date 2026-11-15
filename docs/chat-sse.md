@@ -33,7 +33,7 @@ conversationId? }`. Health indicates server availability, not provider readiness
 
 Authoritative runtime schemas and TypeScript types are in `src/contracts.ts`.
 HTTP 200 uses `Content-Type: text/event-stream; charset=utf-8`,
-`Cache-Control: no-cache, no-transform`, `X-Content-Type-Options: nosniff` and a
+`Cache-Control: no-cache, no-transform, no-store`, `X-Content-Type-Options: nosniff` and a
 server-generated UUID in `X-Request-Id`. The version is independent of app version.
 
 | Event | Payload | Cardinality |
@@ -153,3 +153,9 @@ git status --short --branch
 All automated provider calls use fixtures. Live compatibility and latency require
 a separately authorized smoke test with verified available free quota. This stage
 does not claim the full live-search/token-streaming acceptance gate is complete.
+
+Memory HTTP integration now persists chat attempts and evidence before result delivery.
+Optional turn keys, identity headers, explicit receipts and provider-free recovery
+are documented in [memory.md](memory.md#milestone-3-http-integration). The five
+SSE payload shapes remain unchanged. Error notices say no answer was accepted,
+which does not deny that an unaccepted generated snapshot may exist on disk.

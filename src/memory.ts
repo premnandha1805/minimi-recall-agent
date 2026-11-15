@@ -39,6 +39,7 @@ const Turn = z.strictObject({ id: Id, key: Key, ordinal: z.number().int().nonneg
   provenance: z.literal('server_recorded'), user: Message.extend({ role: z.literal('user') }),
   timezone: Zone.optional(), attempts: z.array(Attempt).max(MEMORY_LIMITS.attempts) });
 export const ConversationSchema = z.strictObject({ schemaVersion: z.literal('recall.memory.v1'), id: Id,
+  clientKey: Key.optional(),
   revision: z.number().int().nonnegative(), createdAtUtc: Utc, updatedAtUtc: Utc, timezone: Zone.optional(),
   seededMessages: z.array(Seed).max(MEMORY_LIMITS.seededMessages), turns: z.array(Turn).max(MEMORY_LIMITS.turns),
 }).superRefine((v, ctx) => {
@@ -60,7 +61,8 @@ export const ConversationSchema = z.strictObject({ schemaVersion: z.literal('rec
       valid = unique(a.id) && !keys.has(a.key) && valid; keys.add(a.key);
       if (a.answer) valid = Id.safeParse(a.answer.result.message.id).success && unique(a.answer.result.message.id) && valid;
       if (['running', 'generated', 'awaiting_receipt'].includes(a.status)) {
-        active++; valid = n === t.attempts.length - 1 && valid;
+        if (a.status !== 'awaiting_receipt') active++;
+        valid = n === t.attempts.length - 1 && valid;
       }
       if (a.status === 'accepted') { accepted++; valid = n === t.attempts.length - 1 && valid; }
     });
@@ -214,18 +216,30 @@ export class ConversationStore {
       return structuredClone(output);
     });
   }
-  async create(timezone?: string): Promise<Conversation> {
+  async create(timezone?: string, clientKey?: string): Promise<Conversation> {
     if (timezone !== undefined) parse(Zone, timezone);
+    if (clientKey !== undefined) parse(Key, clientKey);
     const id = this.id();
     return this.serial(id, async () => {
       const now = this.time();
       const value: Conversation = { schemaVersion: 'recall.memory.v1', id, revision: 0,
-        createdAtUtc: now, updatedAtUtc: now, ...(timezone ? { timezone } : {}), seededMessages: [], turns: [] };
+        createdAtUtc: now, updatedAtUtc: now, ...(timezone ? { timezone } : {}), ...(clientKey ? { clientKey } : {}), seededMessages: [], turns: [] };
       await this.write(value, true); return value;
     });
   }
   async load(id: string): Promise<Conversation | undefined> {
     parse(Id, id); return this.serial(id, () => this.read(id));
+  }
+  /** Legacy browser IDs are aliases, never canonical server-owned identities. */
+  async resolveClientConversation(key: string, timezone?: string): Promise<Conversation> {
+    parse(Key, key);
+    return this.serial('$aliases', async () => {
+      for (const offset of [0, 50]) for (const item of (await this.list({ offset, limit: 50 })).items) {
+        const value = await this.require(item.id);
+        if (value.clientKey === key || value.id === key) return value;
+      }
+      return this.create(timezone, key);
+    });
   }
   /** Startup only. Pending receipt stays pending; never accepted. */
   private async recover(): Promise<void> {
@@ -295,7 +309,8 @@ export class ConversationStore {
     return this.update(id, (v) => {
       const t = v.turns.find((t) => t.id === turnId); if (!t) throw new MemoryError('NOT_FOUND');
       const existing = t.attempts.find((a) => a.key === key); if (existing) return existing;
-      if (v.turns.some((t) => t.attempts.some((a) => activeStatus(a.status))) || t.attempts.some((a) => a.status === 'accepted')) throw new MemoryError('CONFLICT');
+      if (v.turns.some((t) => t.attempts.some((a) => ['running', 'generated'].includes(a.status))) ||
+          t.attempts.some((a) => ['accepted', 'awaiting_receipt'].includes(a.status))) throw new MemoryError('CONFLICT');
       if (t.attempts.length >= MEMORY_LIMITS.attempts) throw new MemoryError('LIMIT');
       const attempt: Conversation['turns'][number]['attempts'][number] = { id: this.id(), key,
         startedAtUtc: this.time(), status: 'running' };

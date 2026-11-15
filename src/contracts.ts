@@ -65,6 +65,8 @@ export const ChatRequestSchema = z.strictObject({
     .array(ChatHistoryMessageSchema)
     .max(MAX_HISTORY_ITEMS, `history may contain at most ${MAX_HISTORY_ITEMS} messages`)
     .optional(),
+  turn: z.strictObject({ key: z.string().min(1).max(128).regex(CONVERSATION_ID_PATTERN),
+    attemptKey: z.string().min(1).max(128).regex(CONVERSATION_ID_PATTERN) }).optional(),
 });
 
 export type ChatHistoryMessage = z.infer<typeof ChatHistoryMessageSchema>;

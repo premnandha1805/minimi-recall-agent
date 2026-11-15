@@ -1,8 +1,8 @@
 # Durable conversation storage — Gate 2, Milestone 1
 
-`src/memory.ts` is an internal storage service only. It is not wired into HTTP,
-the agent, or the browser. Refresh recovery, temporal resolution, context selection
-and historical/current comparison are not implemented by this milestone.
+`src/memory.ts` now connects to Fastify through `src/memory-http.ts`. The browser
+is not yet wired to restore sessions or send receipts. Automatic context retrieval
+and historical/current comparison remain outstanding.
 
 ## Ownership and schema
 
@@ -50,8 +50,10 @@ be reconstructed honestly. No API history loader is implemented here.
 - Active attempts may become `failed` or `cancelled`. Previously generated data
   remains available for diagnosis/recovery but does not become accepted history.
   Late completion cannot overwrite a stopped attempt or another attempt.
-- Only one active (`running`, `generated`, `awaiting_receipt`) attempt is allowed
-  per conversation. An accepted turn cannot be retried. Failed, cancelled,
+- Only one executing (`running`, `generated`) attempt is allowed per conversation.
+  Earlier turns may await receipt while a later turn executes, preserving legacy
+  chat clients. A turn awaiting receipt must be recovered/replayed, not regenerated.
+  An accepted turn cannot be retried. Failed, cancelled,
   interrupted and delivered-partial attempts can be retried within the limit.
 - On open, `running` and `generated` become `interrupted`; saved evidence remains.
   `awaiting_receipt` remains pending; accepted/partial records retain their status.
@@ -122,8 +124,59 @@ invalid state transitions and duplicate stored identities fail explicitly.
 fixtures. It exercises replacement, failure preservation, recovery, limits,
 idempotency, privacy-safe errors, turn order and concurrency without providers.
 
-Later milestones must add HTTP/receipt and browser restoration, server-authoritative
-history merging during chat, temporal parsing and bounded context retrieval.
+Later milestones must add browser restoration/receipts and bounded context
+retrieval. The standalone temporal resolver still needs chat integration.
 Quotation/change verification and true token streaming remain separate outstanding
 requirements. This isolated storage service does not complete Gate 2 or Gate 1's
 live acceptance requirements.
+
+## Milestone 3 HTTP integration
+
+- `POST /api/conversations` with `{}` creates a server-owned conversation.
+- `GET /api/conversations?offset=0&limit=20` lists bounded metadata.
+- `GET /api/conversations/:id` loads the validated document, including provenance,
+  statuses, original messages and answer-scoped evidence snapshots.
+- `DELETE /api/conversations/:id` returns `{deleted}`; pending attempts must be
+  resolved before deletion. Corrupt files are never silently deleted.
+- `GET /api/conversations/:id/turns/:turnId/attempts/:attemptId/result` returns
+  `{status,result}` for awaiting-receipt, accepted or delivered-partial attempts.
+  It does not call providers, accept the answer, or promote interrupted generation.
+- `POST` to the same attempt's `/receipt` with `{messageId}` acknowledges that
+  specific stored answer. A complete result becomes accepted; partial stays partial.
+  Lost receipt replies can safely be retried.
+
+Chat accepts optional `turn: {key, attemptKey}`. Reuse both keys to retransmit a
+submission; use a new attemptKey to retry a failed/cancelled/interrupted attempt.
+The same key preserves original server content. Duplicate completed/pending
+submissions replay their saved SSE result. Running overlap returns HTTP 409.
+Identifiers are returned in `X-Conversation-Id`, `X-Turn-Id`, `X-Attempt-Id` headers;
+SSE payloads remain unchanged. Legacy conversation IDs remain echoed in SSE and
+are persisted as `clientKey` aliases to canonical server UUIDs. Aliases are not
+authentication. Optional alias fields extend stored v1 records; older strict
+readers may reject these records if the application is downgraded.
+
+All configured chats persist user/attempt admission before a provider call.
+Provider preflight remains mandatory. Source snapshots and generated answers are
+saved before awaiting receipt and before emission. Socket writes never imply
+receipt. Cancellation before pending delivery stops the attempt; lost delivery
+after pending delivery remains recoverable. A disk error during finalization may
+leave an interrupted/running record for startup recovery, with a fixed safe log
+notice. No filesystem operation is claimed forcibly cancellable.
+
+Supplied history is merged with disk records and normalized to server originals.
+Known unaccepted assistant answers and later turns are excluded. Seeded history
+remains unverified data. This selects no additional history automatically. Legacy
+clients can continue posting, but do not automatically acknowledge or reuse stored
+pending assistant messages as trusted history; browser receipt integration is next.
+
+The application lazily opens the store and recovers it before first use, closes
+it on shutdown, and keeps write queues released during providers. Storage time
+uses the original request deadline. Private routes require loopback peers, a
+loopback Host matching the listening port, and matching Origin when supplied;
+cross-site fetches are rejected. Same-origin browser/CLI calls are supported;
+there is no public-deployment authentication or CORS access. Private responses
+use no-store, including SSE. Memory routes log a generic path, not message data.
+Storage errors map to sanitized JSON 400/404/409/503/507 before SSE; after hijack
+existing error/done ownership remains unchanged. HTTP memory reads/recovery work
+without model credentials. `BuildServerOptions.memoryDirectory` selects an owned
+private directory for tests or local deployment; default remains `.recall-data/`.

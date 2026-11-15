@@ -1,3 +1,7 @@
+import { rm } from 'node:fs/promises';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { runAgent, type AgentStopReason } from '../src/agent.js';
@@ -115,7 +119,8 @@ describe('diagnostics through Azure adapter and Fastify logs (mock network)', ()
         },
       }], usage: { prompt_tokens: 520, completion_tokens: model.usage!.outputTokens,
         completion_tokens_details: { reasoning_tokens: 0 } }, PRIVATE_UPSTREAM_PROPERTY: 'PRIVATE_VALUE' }));
-      const app = buildServer({ config: loadConfig(azureEnv), fetchImpl,
+      const memoryDirectory = mkdtempSync(join(tmpdir(), 'recall-http-offline-'));
+    const app = buildServer({ memoryDirectory, config: loadConfig(azureEnv), fetchImpl,
         logStream: new Writable({ write(chunk, _encoding, callback) { output += String(chunk); callback(); } }),
       });
       try {
@@ -134,6 +139,6 @@ describe('diagnostics through Azure adapter and Fastify logs (mock network)', ()
           stopReason: reason, validationCategory: category, modelCalls: 1, searchCalls: 0 });
         expect(output).not.toMatch(/PRIVATE|offline-azure-secret|offline-tavily-secret|https:\/\//);
         expect(fetchImpl).toHaveBeenCalledTimes(1);
-      } finally { await app.close(); }
+      } finally { await app.close(); await rm(memoryDirectory, { recursive: true, force: true }); }
     });
 });

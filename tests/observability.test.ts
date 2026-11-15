@@ -1,3 +1,7 @@
+import { rm } from 'node:fs/promises';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runAgent } from '../src/agent.js';
@@ -147,7 +151,8 @@ describe('bounded, privacy-safe agent stage observations (offline)', () => {
 describe('Fastify operational logs with real adapters and mocked network', () => {
   it.each(['answer', 'research', 'failure'] as const)('correlates %s stages without leaking request or provider data', async (kind) => {
     let output = ''; let models = 0;
-    const app = buildServer({ config: loadConfig({ ...azureEnv, LOG_LEVEL: 'info' }),
+    const memoryDirectory = mkdtempSync(join(tmpdir(), 'recall-http-offline-'));
+    const app = buildServer({ memoryDirectory, config: loadConfig({ ...azureEnv, LOG_LEVEL: 'info' }),
       logStream: new Writable({ write(chunk, _encoding, callback) { output += String(chunk); callback(); } }),
       fetchImpl: async (url) => {
         if (String(url).includes('tavily')) return json({ results: [{ title: 'PRIVATE title',
@@ -174,6 +179,6 @@ describe('Fastify operational logs with real adapters and mocked network', () =>
         { inputTokens: 17, completionTokens: 8, reasoningTokens: 3 });
       expect(output).not.toMatch(/PRIVATE|offline-azure-secret|offline-tavily-secret|fixture\.openai|example\.com/);
       expect(response.body).not.toMatch(/durationMs|inputTokens|reasoningTokens|Agent stage completed/);
-    } finally { await app.close(); }
+    } finally { await app.close(); await rm(memoryDirectory, { recursive: true, force: true }); }
   });
 });

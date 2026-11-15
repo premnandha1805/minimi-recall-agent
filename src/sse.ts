@@ -5,15 +5,15 @@ import { ExecutionTimeoutError } from './execution.js';
 import type { AgentStopReason } from './agent.js';
 
 export const STREAM_ERROR_MESSAGES: Record<StreamErrorCode, string> = {
-  REQUEST_TIMEOUT: 'Request deadline exceeded. No answer was recorded.',
-  MODEL_TIMEOUT: 'The model request timed out. No answer was recorded.',
-  MODEL_FAILED: 'The model request failed. No answer was recorded.',
-  INVALID_MODEL_OUTPUT: 'The model returned an unusable answer. No answer was recorded.',
-  INVALID_CITATION: 'The answer referenced an unknown source. No answer was recorded.',
+  REQUEST_TIMEOUT: 'Request deadline exceeded. No answer was accepted.',
+  MODEL_TIMEOUT: 'The model request timed out. No answer was accepted.',
+  MODEL_FAILED: 'The model request failed. No answer was accepted.',
+  INVALID_MODEL_OUTPUT: 'The model returned an unusable answer. No answer was accepted.',
+  INVALID_CITATION: 'The answer referenced an unknown source. No answer was accepted.',
   CONTEXT_LIMIT: 'The supplied conversation exceeds the model context limit.',
-  AGENT_LIMIT: 'The agent reached an execution limit. No answer was recorded.',
-  CANCELLED: 'The request was cancelled. No answer was recorded.',
-  INTERNAL_ERROR: 'The request could not be completed. No answer was recorded.',
+  AGENT_LIMIT: 'The agent reached an execution limit. No answer was accepted.',
+  CANCELLED: 'The request was cancelled. No answer was accepted.',
+  INTERNAL_ERROR: 'The request could not be completed. No answer was accepted.',
 };
 export function agentErrorCode(reason: AgentStopReason): StreamErrorCode {
   switch (reason) {
@@ -51,7 +51,7 @@ export class SseResponse {
     response.once('finish', this.cleanup);
     signal.addEventListener('abort', this.onAbort, { once: true });
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform', 'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-cache, no-transform, no-store', 'X-Content-Type-Options': 'nosniff',
       'X-Request-Id': meta.requestId });
     this.write(encodeEvent('meta', meta) + encodeEvent('progress', { phase: 'accepted' }));
     if (signal.aborted) this.onAbort();

@@ -6,6 +6,8 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { ZodError } from 'zod';
 import { type AppConfig, loadConfig } from './config.js';
 import { createExecution, runWithSignal } from './execution.js';
+import { authoritativeHistory, installMemoryHttp } from './memory-http.js';
+import { MemoryError } from './memory.js';
 import { runAgent } from './agent.js';
 import { createModelProvider } from './model.js';
 import { createTavilySearch } from './search.js';
@@ -69,6 +71,7 @@ const STATIC_ASSETS: Record<string, StaticAssetEntry> = {
 
 export interface BuildServerOptions {
   config?: AppConfig;
+  memoryDirectory?: string;
   logger?: boolean;
   logStream?: Writable;
   /** Injectable network boundary for offline integration tests; factories still validate config. */
@@ -170,7 +173,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
           serializers: {
             req: (request: { method: string; url: string }) => ({
               method: request.method,
-              path: request.url.split('?')[0],
+              path: request.url.split('?')[0].startsWith('/api/conversations') ? '/api/conversations' : request.url.split('?')[0],
             }),
             // Error messages/stacks/causes may contain provider URLs or input.
             err: serializeError,
@@ -244,7 +247,8 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
-  app.post('/api/chat', async (request, reply) => {
+  const memory = installMemoryHttp(app, options.memoryDirectory);
+  app.post('/api/chat', async (request, reply) => memory.track((async () => {
     const contentType = request.headers['content-type'];
     if (contentType && !contentType.toLowerCase().includes('application/json')) {
       return reply
@@ -287,40 +291,94 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         'Chat requires a supported Azure model configuration and Tavily credentials.', request.id,
         { conversationId: parsed.data.conversationId }));
     }
-    const conversationId = parsed.data.conversationId ?? randomUUID();
-    reply.hijack();
-    let stream: SseResponse | undefined;
+    const store = await memory.getStore();
+    request.executionSignal.throwIfAborted();
+    const conversation = await store.resolveClientConversation(parsed.data.conversationId ?? randomUUID(), parsed.data.timezone);
+    const conversationId = parsed.data.conversationId ?? conversation.id;
+    if (memory.executing.has(conversation.id)) throw new MemoryError('CONFLICT');
+    memory.executing.add(conversation.id);
+    let turnId: string | undefined;
+    let attemptId: string | undefined;
+    let awaitingReceipt = false;
     try {
-      stream = new SseResponse(reply.raw, request.executionSignal, {
-        version: CHAT_STREAM_VERSION, requestId: request.id, conversationId, answerMode: 'final',
-      });
-      request.sseResponse = stream;
-      await stream.ready();
-      const owner = stream;
-      const result = await runAgent(parsed.data, {
-        provider: { contextWindowTokens: provider.contextWindowTokens, complete: async (input) => {
-          await owner.progress('model_started'); input.signal.throwIfAborted(); return provider.complete(input);
-        } },
-        search: async (query, input) => {
-          await owner.progress('search_started'); input.signal.throwIfAborted(); return search(query, input);
-        },
-        signal: request.executionSignal, startedAt: request.executionStartedAt,
-        deadlineMs: config.REQUEST_DEADLINE_MS,
-        observe: (event) => request.log.info({ requestId: request.id, ...event }, 'Agent stage completed'),
-      });
-      if (result.reason === 'answer') {
-        stream.complete(ChatResultSchema.parse({
-          message: { id: randomUUID(), role: 'assistant', content: result.answer, timestamp: new Date().toISOString() },
-          coverage: result.status === 'completed' ? 'complete' : 'partial', issues: result.issues,
-          sources: result.sources.map(({ text: _text, ...metadata }) => metadata), evidenceCheck: 'citation_ids_only',
-        }));
-      } else stream.fail(agentErrorCode(result.reason));
-    } catch {
-      if (stream) stream.fail('INTERNAL_ERROR');
-      else reply.raw.destroy();
+      request.executionSignal.throwIfAborted();
+      if (parsed.data.history) await store.seed(conversation.id, parsed.data.history);
+      request.executionSignal.throwIfAborted();
+      const turn = await store.addTurn(conversation.id, { key: parsed.data.turn?.key ?? randomUUID(),
+        content: parsed.data.message, timezone: parsed.data.timezone });
+      turnId = turn.id;
+      const attempt = await store.startAttempt(conversation.id, turn.id, parsed.data.turn?.attemptKey ?? randomUUID());
+      attemptId = attempt.id;
+      request.executionSignal.throwIfAborted();
+      reply.raw.setHeader('X-Conversation-Id', conversation.id);
+      reply.raw.setHeader('X-Turn-Id', turn.id);
+      reply.raw.setHeader('X-Attempt-Id', attempt.id);
+      if (attempt.answer && ['awaiting_receipt', 'accepted', 'partial'].includes(attempt.status)) {
+        awaitingReceipt = true;
+        reply.hijack();
+        try {
+        const replay = new SseResponse(reply.raw, request.executionSignal, {
+          version: CHAT_STREAM_VERSION, requestId: request.id, conversationId, answerMode: 'final' });
+        request.sseResponse = replay;
+        await replay.ready(); replay.complete(attempt.answer.result);
+        } catch { reply.raw.destroy(); }
+        return reply;
+      }
+      if (attempt.status !== 'running') throw new MemoryError('CONFLICT');
+      reply.hijack();
+      let stream: SseResponse | undefined;
+      try {
+        stream = new SseResponse(reply.raw, request.executionSignal, {
+          version: CHAT_STREAM_VERSION, requestId: request.id, conversationId, answerMode: 'final',
+        });
+        request.sseResponse = stream;
+        await stream.ready();
+        const owner = stream;
+        const { turn: _turn, ...agentInput } = parsed.data;
+        const history = authoritativeHistory((await store.load(conversation.id))!, parsed.data.history ?? [], turn.ordinal);
+        request.executionSignal.throwIfAborted();
+        const result = await runAgent({ ...agentInput, history, message: turn.user.content }, {
+          provider: { contextWindowTokens: provider.contextWindowTokens, complete: async (input) => {
+            await owner.progress('model_started'); input.signal.throwIfAborted(); return provider.complete(input);
+          } },
+          search: async (query, input) => {
+            await owner.progress('search_started'); input.signal.throwIfAborted(); return search(query, input);
+          },
+          signal: request.executionSignal, startedAt: request.executionStartedAt,
+          deadlineMs: config.REQUEST_DEADLINE_MS,
+          observe: (event) => request.log.info({ requestId: request.id, ...event }, 'Agent stage completed'),
+        });
+        if (result.reason === 'answer') {
+          const answer = ChatResultSchema.parse({
+            message: { id: randomUUID(), role: 'assistant', content: result.answer, timestamp: new Date().toISOString() },
+            coverage: result.status === 'completed' ? 'complete' : 'partial', issues: result.issues,
+            sources: result.sources.map(({ text: _text, ...metadata }) => metadata), evidenceCheck: 'citation_ids_only',
+          });
+          request.executionSignal.throwIfAborted();
+          const saved = await store.saveGenerated(conversation.id, turn.id, attempt.id, { result: answer, evidence: result.sources });
+          request.executionSignal.throwIfAborted();
+          await store.markAwaitingReceipt(conversation.id, turn.id, attempt.id);
+          awaitingReceipt = true;
+          request.executionSignal.throwIfAborted();
+          stream.complete(saved.answer!.result);
+        } else {
+          await store.stopAttempt(conversation.id, turn.id, attempt.id,
+            result.reason === 'cancelled' ? 'cancelled' : 'failed', result.reason === 'deadline' || result.reason === 'model_timeout' ? 'TIMEOUT' : 'MODEL_FAILED');
+          stream.fail(agentErrorCode(result.reason));
+        }
+      } catch {
+        if (stream) stream.fail('INTERNAL_ERROR');
+        else reply.raw.destroy();
+      }
+      return reply;
+    } finally {
+      try {
+        if (turnId && attemptId && !awaitingReceipt) await store.stopAttempt(conversation.id, turnId, attemptId,
+          request.executionSignal.aborted ? 'cancelled' : 'failed', request.executionSignal.aborted ? 'CANCELLED' : 'STORAGE');
+      } catch { request.log.error({ requestId: request.id }, 'Conversation finalization failed'); }
+      memory.executing.delete(conversation.id);
     }
-    return reply;
-  });
+  })()));
 
   app.setNotFoundHandler(async (request, reply) => {
     return reply
@@ -335,6 +393,11 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   });
 
   app.setErrorHandler(async (error: FastifyError, request, reply) => {
+    if (error instanceof MemoryError) {
+      const status = error.code === 'INVALID_INPUT' ? 400 : error.code === 'NOT_FOUND' ? 404 :
+        error.code === 'CONFLICT' ? 409 : error.code === 'LIMIT' ? 507 : 503;
+      return reply.code(status).send(buildErrorResponse(`MEMORY_${error.code}`, 'Conversation storage operation could not be completed.', request.id));
+    }
     if (
       error.code === 'FST_ERR_CTP_INVALID_JSON_BODY' ||
       error.code === 'FST_ERR_CTP_EMPTY_JSON_BODY'
