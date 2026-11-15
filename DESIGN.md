@@ -31,10 +31,11 @@ interim SSE contract or establish quotation/factual verification.
 - **Evidence:** Each result supplies ID, title, URL, extracted text, retrieval time, and optional publication/effective dates (never invented). Link only known `[S#]` citations. For **Confirmed change**, require a short cited quotation and check it before final delivery against the *exact text shown to the model*, allowing Unicode/whitespace/typographic normalization. Nonmatching cited quotations produce a visible warning answer. A matching quote does **not** prove the entire claim. Retrieval date is not change date.
 
 **Constrained verification stage:** [verification.md](docs/verification.md) implements
-source-quotation matching and four deterministic verdicts for explicitly labeled,
-comparable evidence records. General prose fact extraction, broad live comparison
-quality and full claim verification remain unverified. Unsupported evidence stays
-Cannot verify. Existing SSE payloads and execution budgets remain unchanged.
+source-quotation matching, four deterministic verdicts, labeled records, and bounded
+prose parsing for explicit, fully stated evidence lines. Broad live comparison
+quality and full claim verification remain unverified. Unsupported evidence and
+unmapped vendor domains stay Cannot verify. Existing SSE payloads and execution
+budgets remain unchanged.
 
 ## Change-verification contract
 
@@ -62,7 +63,7 @@ Lead with the answer; cite current claims inline; explain whether the earlier re
 
 ## Evaluation and submission
 
-The implemented [offline evaluation](docs/evaluation.md) contains **28 frozen cases** through real orchestration with scripted model/search boundaries. Recorded outcomes: **28/28 structural/safety passes, 25/28 usefulness passes**; three restrictive abstentions expose natural-language grammar and authority-policy limits. The recorded regression suite has **597 passes and one skip**. These results do not measure live model accuracy or adversarial-model injection resistance.
+The implemented [offline evaluation](docs/evaluation.md) contains **31 frozen cases** through real orchestration with scripted model/search boundaries. Recorded outcomes: **31/31 structural/safety passes, 30/31 usefulness passes**; one restrictive abstention (C8) reflects the authority whitelist. The recorded regression suite has **687 passes and one skip**. These results do not measure live model accuracy or adversarial-model injection resistance.
 
 **Outstanding acceptance:** measured always-search baseline comparison, separate live model/latency evaluation, real-browser acceptance and clean-clone startup. Live correctness, unsupported-claim rate and p50/p95 latency remain **unmeasured**. Recorded local mocked timings are single-run observations, not live latency.
 

@@ -55,8 +55,8 @@ npm.cmd run eval:offline
 git diff --check
 ```
 
-The committed offline run records **597 tests passed, one skipped**, with **28/28
-structural/safety checks and 25/28 usefulness checks**. These are scripted-provider
+The committed offline run records **687 tests passed, one skipped**, with **31/31
+structural/safety checks and 30/31 usefulness checks**. These are scripted-provider
 outcomes, not live LLM accuracy. The evaluation command rewrites
 `docs/evaluation-results.json` with local observations; timings/IDs vary by run.
 See [evaluation methodology and failures](docs/evaluation.md). Do not run
@@ -107,16 +107,17 @@ deployment authentication. See [storage/recall limits](docs/memory.md).
 Citation IDs establish registry membership, not factual truth. Historical S1 and
 current S1 remain separate. Four verdicts are retained: Confirmed change, No
 confirmed change, Cannot verify, Not comparable. Confirmation currently requires
-the [strict evidence grammar and explicit authority policy](docs/verification.md).
-Natural-language pricing often produces restrictive abstentions. Quote matching
+the [evidence grammar, bounded prose parsing and explicit authority policy](docs/verification.md).
+Unmapped product domains (such as fictional Acme in C8) produce Cannot verify. Quote matching
 uses model-visible snippets and does not prove complete claim support.
 
 ## Five-minute reviewer demonstration
 
 1. Run `npm.cmd run eval:offline`: W1 shows scripted research/SSE/citations;
-   R1–R6 show restarted cross-conversation/date/zone retrieval; C1–C5 show four
-   comparison outcomes; C6–C11 expose abstentions. These are frozen synthetic
-   demonstrations, explicitly **not genuine live research**.
+   R1–R6 show restarted cross-conversation/date/zone retrieval; G7A1–G7A3 show
+   mixed recall; C1–C5 show four comparison outcomes; C6–C7 verify bounded prose;
+   C8 exposes the authority limit; C9–C11 expose appropriate abstentions. These are
+   frozen synthetic demonstrations, explicitly **not genuine live research**.
 2. Inspect `docs/evaluation-results.json` for actual output, provider call counts,
    and the distinction between safety and usefulness.
 3. With separately authorized quotas only: ask for the latest PostgreSQL release
