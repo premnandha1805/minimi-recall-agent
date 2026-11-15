@@ -23,8 +23,9 @@ export interface RetrievedMemory {
 }
 const stopWords = new Set(('what did i you we our the a an on in at to from earlier previous past last discuss discussion discussed ask asked tell me ' +
   'which five tools shortlist shortlisted summarize summarise conversation conversations about and of was were with has have changed now current latest ' +
-  'is have any product products prices price your recommendation correct major new feature launch launched since this discussed '
-  + 'today yesterday monday tuesday wednesday thursday friday saturday sunday week days ago november january february march april may june july august september october december').split(' '));
+  'is have any product products prices price your recommendation correct major new feature launch launched since this discussed ' +
+  'can could would please kindly recall remember remind us about tell share give again answer still valid accurate then ' +
+  'today yesterday monday tuesday wednesday thursday friday saturday sunday week days ago november january february march april may june july august september october december').split(' '));
 function keywords(text: string): string[] {
   return [...new Set(text.normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])]
     .map((v) => v === 'postgresql' ? 'postgres' : v === 'crms' ? 'crm' : v)
@@ -32,17 +33,29 @@ function keywords(text: string): string[] {
 }
 /** Recognize recall intent only. External fact dates never silently select conversations. */
 export function recallIntent(query: string) {
-  const recall = isChangeRequest(query) || /\b(?:what did (?:i|we)|which .{0,80}did we|summari[sz]e our (?:earlier|previous)|earlier conversation|recall|remember|our earlier)\b/i.test(query);
+  const recall = isChangeRequest(query) || /\b(?:what did (?:i|we)|(?:i|we) (?:asked|discussed|shortlisted)|which .{0,80}did we|summari[sz]e our (?:earlier|previous)|earlier conversation|recall|remember|remind|our earlier)\b/i.test(query);
   const memoryOnly = recall && !isChangeRequest(query) && !/\b(?:now|current|latest|changed|compare|verify|update|still)\b/i.test(query);
   return { recall, memoryOnly };
 }
-function dateHint(query: string): string | undefined {
-  const relative = query.match(/\b(?:yesterday|today|last (?:sunday|monday|tuesday|wednesday|thursday|friday|saturday|week)|\d+ days? ago)\b/gi) ?? [];
-  const since = query.match(/\bsince\s+((?:last )?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|\d{4}-\d{2}-\d{2})\b/i)?.[1];
-  const explicit = since ?? query.match(/\b(?:on|from|during)\s+([^?!]+)(?:[?!]|$)/i)?.[1]?.trim();
-  if (relative.length > 1) return 'unsupported multiple temporal references';
-  return relative[0] ?? explicit ?? query.match(/\b(?:last|next|this) (?:month|year|week)\b/i)?.[0];
+/** Separate the remembered discussion from follow-up instructions, without a model call. */
+function historicalLocator(query: string): string {
+  const clauses = query.split(/[?!;]|\.(?=\s|$)|\b(?:and|but)\s+(?=(?:is|are|has|have|verify|check|compare|update)\b)/i);
+  const locators = clauses.filter((clause) => /\b(?:what did (?:i|we)|(?:i|we) (?:asked|discussed|shortlisted)|did we|recall|remember|remind|our (?:earlier|previous))\b/i.test(clause));
+  return locators.length ? locators.join('; ') : query;
 }
+const months = 'January|February|March|April|May|June|July|August|September|October|November|December';
+const weekdays = 'Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday';
+// Capture invalid numeric dates too: the resolver, not this extractor, validates calendars.
+const dateExpressions = new RegExp(`\\b(?:\\d{1,4}[/.\\-]\\d{1,2}(?:[/.\\-]\\d{1,4})?|\\d{1,2} (?:${months})(?: \\d{4})?|(?:${months}) \\d{1,2}(?:,? \\d{4})?|(?:last|next|this) (?:${weekdays}|week|month|year)|${weekdays}|yesterday|today|\\d+ days? ago)\\b`, 'gi');
+function dateHint(locator: string): string | undefined {
+  const spans = [...locator.matchAll(dateExpressions)];
+  if (spans.length > 1) return 'unsupported multiple temporal references';
+  if (spans.length) return spans[0][0];
+  // An unrecognized explicit calendar locator must not become an unrestricted lookup.
+  if (/\b(?:on|during)\s+\S/i.test(locator)) return 'unsupported calendar reference';
+  return undefined;
+}
+const descriptiveTerms = new Set('options details notes information recommendations pricing cost costs services available affordable managed suitable comparison'.split(' '));
 /** Originals are retained here. Only accepted server assistants are eligible. */
 function records(value: Conversation): HistoricalRecord[] {
   return [
@@ -66,12 +79,14 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
   const intent = recallIntent(options.query);
   const memory: RetrievedMemory = { ...intent, reference: { instant: options.referenceInstant, timezone: options.timezone }, status: 'not_found', records: [], matches: 0 };
   memory.reference.localTime = new Intl.DateTimeFormat('en-GB', { timeZone: options.timezone, dateStyle: 'full', timeStyle: 'long' }).format(new Date(options.referenceInstant));
-  const hint = intent.recall ? dateHint(options.query) : undefined;
+  const locator = historicalLocator(options.query);
+  const hint = intent.recall ? dateHint(locator) : undefined;
   if (hint) {
     memory.temporal = createTemporalResolver({ referenceInstant: options.referenceInstant, timezone: options.timezone }).resolve(hint, 'conversation');
     if (memory.temporal.status !== 'resolved') { memory.status = 'unsupported_date'; return memory; }
   }
-  const topic = keywords(options.query);
+  const topic = keywords(locator.replace(dateExpressions, ' '));
+  const anchors = topic.filter((word) => !descriptiveTerms.has(word));
   const candidates: Array<{ record: HistoricalRecord; score: number }> = [];
   let scanned = 0;
   const consider = (value: Conversation) => {
@@ -86,8 +101,10 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
       if (memory.temporal?.status === 'resolved' && (time < Date.parse(memory.temporal.startUtc) || time >= Date.parse(memory.temporal.endUtcExclusive))) continue;
       const haystack = new Set(keywords(`${r.user.content} ${r.assistant?.content ?? ''}`));
       const overlap = topic.filter((word) => haystack.has(word)).length;
-      // Require every explicit query keyword: no year-only or unrelated-entity fallback.
-      if (intent.recall && topic.length && overlap !== topic.length) continue;
+      // Entity/topic anchors are mandatory; descriptive wording contributes to rank.
+      // Generic words alone never establish a topic or authorize a date-free scan match.
+      if (intent.recall && (topic.length ? !anchors.length || anchors.some((word) => !haystack.has(word)) ||
+          overlap * 2 < topic.length : !memory.temporal)) continue;
       if (!intent.recall && r.conversationId !== options.activeConversationId) continue;
       r.selection = 'match';
       candidates.push({ record: r, score: overlap * 10 + (memory.temporal ? 100 : 0) });
@@ -125,9 +142,22 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
   const maximum = intent.recall ? RETRIEVAL_LIMITS.selected : RETRIEVAL_LIMITS.scannedRecords;
   memory.records = candidates.slice(0, maximum).map((v) => v.record);
   if (candidates.length > maximum) memory.limitation = 'More matching whole turns exist than can be included. Narrow the date or topic.';
-  // Never pretend two equally relevant discussions are one historical conversation.
+  // Only consecutive turns on the same local day can form one discussion. A gap,
+  // another conversation, or another day retains ambiguity, regardless of rank.
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: options.timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const ordered = [...candidates].sort((a,b) => a.record.conversationId.localeCompare(b.record.conversationId) || a.record.ordinal - b.record.ordinal);
+  let discussions = 0;
+  for (let i = 0; i < ordered.length; i++) {
+    const r = ordered[i].record; const previous = ordered[i - 1]?.record;
+    const previousTopics = new Set(previous ? keywords(previous.user.content).filter((word) => !descriptiveTerms.has(word)) : []);
+    const related = anchors.length > 0 || /^(?:and|those|they|it|also|why|how)\b/i.test(r.user.content) ||
+      keywords(r.user.content).some((word) => previousTopics.has(word));
+    if (!previous || r.provenance !== 'server_recorded' || previous.provenance !== 'server_recorded' ||
+        r.conversationId !== previous.conversationId || r.ordinal !== previous.ordinal + 1 ||
+        !related || day.format(new Date(r.user.timestamp)) !== day.format(new Date(previous.user.timestamp))) discussions++;
+  }
   memory.status = memory.limitation ? 'limited' : !memory.matches ? 'not_found' :
-    intent.recall && candidates.filter((v) => v.record.selection === 'match').length > 1 ? 'ambiguous' : 'found';
+    intent.recall && discussions > 1 ? 'ambiguous' : 'found';
   memory.records.sort((a, b) => a.conversationId.localeCompare(b.conversationId) || (a.provenance === b.provenance ? 0 : a.provenance === 'client_seed' ? -1 : 1) || a.ordinal - b.ordinal || a.turnId.localeCompare(b.turnId));
   return memory;
 }

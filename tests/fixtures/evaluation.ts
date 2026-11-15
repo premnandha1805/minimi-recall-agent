@@ -5,9 +5,13 @@ export const shortlist = 'HubSpot, Zoho, Pipedrive, Freshsales, Salesforce';
 export const price = (amount: string, day: string, product = 'Neon', plan = 'Launch') =>
   `Product: ${product}; Plan: ${plan}; Region: US; Currency: USD; Price: ${amount}; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: ${day}.`;
 export interface EvalCase { id: string; category: 'web' | 'recall' | 'comparison' | 'reliability';
-  mode: string; query: string; expected: string; quality?: string; old?: string; fresh?: string; product?: string; timezone?: string; timestamp?: string }
+  mode: string; query: string; expected: string; quality?: string; old?: string; fresh?: string; product?: string; timezone?: string; timestamp?: string;
+  baselineQuestion?: string; historicalDay?: string }
 const change = 'Have our Neon prices changed since Monday?';
 export const cases: EvalCase[] = [
+  { id: 'G7A1', category: 'comparison', mode: 'mixed-recall', query: 'On Monday we shortlisted five CRM tools. Have any changed pricing or released something important?', baselineQuestion: 'CRM shortlist', historicalDay: '2026-11-16', expected: 'Cannot verify' },
+  { id: 'G7A2', category: 'comparison', mode: 'mixed-recall', query: 'What did I ask on 3 November? Is your answer still correct today?', baselineQuestion: 'Postgres hosting', historicalDay: '2026-11-03', timestamp: '2026-11-03T12:00:00.000Z', expected: 'Cannot verify' },
+  { id: 'G7A3', category: 'comparison', mode: 'mixed-recall', query: 'Last Tuesday I asked about Postgres hosting. Has any pricing changed since then?', baselineQuestion: 'Postgres hosting', historicalDay: '2026-11-10', timestamp: '2026-11-10T12:00:00.000Z', expected: 'Cannot verify' },
   { id: 'W1', category: 'web', mode: 'web', query: 'Research Postgres hosting', expected: 'Available [S1]' },
   { id: 'W2', category: 'web', mode: 'bad-id', query: 'Research Postgres hosting', expected: 'INVALID_CITATION' },
   { id: 'W3', category: 'web', mode: 'bad-quote', query: 'Research Postgres hosting', expected: 'quotation warning' },

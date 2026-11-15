@@ -26,8 +26,8 @@ export function quoteMatches(quote: string, evidence: string): boolean {
   return false;
 }
 export function isChangeRequest(query: string): boolean {
-  return /\b(?:changed?|changes|still correct|still valid|major new feature|new feature|feature launch)\b/i.test(query) &&
-    /\b(?:since|previous|earlier|last discussed|shortlist|shortlisted|our|we|your previous)\b/i.test(query);
+  return /\b(?:changed?|changes|still (?:correct|valid|accurate)|major new feature|new feature|feature launch|released|verify|recheck)\b/i.test(query) &&
+    /\b(?:since|previous|earlier|last discussed|shortlist|shortlisted|our|we|your (?:previous|answer|recommendation)|(?:i|we) (?:asked|discussed)|what did (?:i|we))\b/i.test(query);
 }
 const Ref = z.strictObject({ sourceId: z.string().regex(/^S[1-9]\d*$/), quote: z.string().min(1).max(500) });
 const HistoricalRef = Ref.extend({ conversationId: z.uuid(), turnId: z.uuid() });

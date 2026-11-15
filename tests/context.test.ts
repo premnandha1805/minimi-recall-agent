@@ -26,6 +26,91 @@ const opts = (query: string) => ({ query, activeConversationId: id(999), current
   timezone: 'UTC', signal: new AbortController().signal, startedAt: performance.now(), deadlineMs: 25000 });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 describe('deterministic stored retrieval and agent context', () => {
+  const challengeCases = [
+    ['On Monday we shortlisted five CRM tools. Have any changed pricing or released something important?', 'CRM shortlist', '2026-11-16'],
+    ['What did I ask on 3 November? Is your answer still correct today?', 'Postgres hosting', '2026-11-03'],
+    ['Last Tuesday I asked about Postgres hosting. Has any pricing changed since then?', 'Postgres hosting', '2026-11-10'],
+  ];
+  it.each(challengeCases)('Gate 7A exact challenge: %s', async (query, topic, day) => {
+    const original = conversation(10, topic, `${day}T10:00:00.000Z`, 'HubSpot, Zoho, Pipedrive, Freshsales, Salesforce');
+    const memory = await retrieveMemory(store([original]), opts(query));
+    expect(memory).toMatchObject({ status: 'found', memoryOnly: false, temporal: { localStart: day } });
+    expect(memory.records[0].assistant).toEqual(original.turns[0].attempts[0].answer!.result.message);
+    let calls = 0;
+    const search = vi.fn(async () => []);
+    const answer = await runAgent({ message: query }, { memory, signal: new AbortController().signal, search,
+      provider: { contextWindowTokens: 65536, complete: async (request) => {
+        expect(JSON.stringify(request.messages)).toContain('Salesforce');
+        expect(request.messages.some((m) => m.role === 'system' && m.content.includes('comparisons'))).toBe(true);
+        return ++calls === 1 ? { text: '', finishReason: 'tool_calls', toolCalls: [{ id: 'research', name: 'web_search', arguments: '{"queries":["current official evidence"]}' }] } :
+          { text: '{"comparisons":[{"kind":"price"}]}', finishReason: 'stop', toolCalls: [] };
+      } } });
+    expect(search).toHaveBeenCalledTimes(1); expect(answer.answer).toContain('Cannot verify');
+  });
+  it('Gate 7A polite recall retains topic and disables search', async () => {
+    const memory = await retrieveMemory(store([conversation(10)]), opts('Can you recall our Postgres hosting discussion?'));
+    expect(memory.status).toBe('found');
+    const search = vi.fn();
+    await runAgent({ message: 'Can you recall our Postgres hosting discussion?' }, { memory, search, signal: new AbortController().signal,
+      provider: { contextWindowTokens: 65536, complete: async (request) => {
+        expect(request.tools).toEqual([]); return { text: 'Neon and Supabase were discussed.', finishReason: 'stop', toolCalls: [] };
+      } } });
+    expect(search).not.toHaveBeenCalled();
+  });
+  it('Gate 7A keeps contiguous same-discussion matches without false ambiguity', async () => {
+    const original = conversation(10); const next = conversation(20, 'Postgres hosting details').turns[0]; next.ordinal = 1;
+    original.turns.push(next);
+    const memory = await retrieveMemory(store([original]), opts('Summarize our earlier Postgres hosting discussion.'));
+    expect(memory.status).toBe('found'); expect(memory.records).toHaveLength(2);
+  });
+  it.each(['Please remind me about our earlier Postgres hosting options.', 'Could you recall our PostgreSQL hosting details?'])('Gate 7A descriptive wording: %s', async (query) => {
+    expect((await retrieveMemory(store([conversation(10)]), opts(query))).status).toBe('found');
+  });
+  it('Gate 7A preserves anchors against same-date and overlapping-product distractors', async () => {
+    const correct = conversation(10, 'Neon Postgres hosting', undefined, 'Neon hosting notes');
+    const distractors = [conversation(20, 'Neon CRM pricing', undefined, 'CRM notes'), conversation(30, 'Supabase Postgres hosting', undefined, 'Supabase notes')];
+    const query = 'Please recall our Neon Postgres hosting options on 3 November';
+    const first = await retrieveMemory(store([...distractors, correct]), opts(query));
+    const again = await retrieveMemory(store([correct, ...distractors.reverse()]), opts(query));
+    expect(first.status).toBe('found'); expect(first.records.map((r) => r.conversationId)).toEqual([correct.id]);
+    expect(again).toEqual(first);
+    for (const generic of ['Recall our options', 'Recall our pricing information', 'Recall our tools']) {
+      expect((await retrieveMemory(store([correct]), opts(generic))).status).toBe('not_found');
+    }
+  });
+  it('Gate 7A keeps competing discussions ambiguous, including separated turns in one conversation', async () => {
+    const a = conversation(10); const b = conversation(20);
+    expect((await retrieveMemory(store([a,b]), opts('Recall Postgres hosting'))).status).toBe('ambiguous');
+    const unrelated = conversation(30, 'CRM', undefined, 'CRM only').turns[0]; unrelated.ordinal = 1;
+    b.turns[0].ordinal = 2; a.turns.push(unrelated, b.turns[0]);
+    expect((await retrieveMemory(store([a]), opts('Recall Postgres hosting'))).status).toBe('ambiguous');
+  });
+  it.each(['What did I ask on 31 November? Is it still correct today?', 'Recall Postgres on 03/11/2026',
+    'Recall Postgres last month', 'What did we discuss yesterday and today?', 'Recall Postgres on Christmas'])('Gate 7A invalid/ambiguous locator: %s', async (query) => {
+    expect((await retrieveMemory(store([conversation(10)]), opts(query))).status).toBe('unsupported_date');
+  });
+  it('Gate 7A separates same-sentence verification and preserves genuinely historical today', async () => {
+    const old = conversation(10);
+    const current = conversation(20, 'CRM', '2026-11-17T01:00:00.000Z');
+    const mixed = await retrieveMemory(store([old,current]), opts('What did I ask on 3 November and is your answer still correct today?'));
+    expect(mixed).toMatchObject({ status: 'found', memoryOnly: false, temporal: { localStart: '2026-11-03' } });
+    const today = await retrieveMemory(store([old,current]), opts('What did I ask today?'));
+    expect(today.records[0].conversationId).toBe(current.id); expect(today.memoryOnly).toBe(true);
+  });
+  it('Gate 7A does not join unrelated adjacent topics or discussions on different days', async () => {
+    const a = conversation(10); const other = conversation(20, 'CRM shortlist', undefined, 'CRM only').turns[0]; other.ordinal = 1;
+    a.turns.push(other);
+    expect((await retrieveMemory(store([a]), opts('What did I ask on 3 November?'))).status).toBe('ambiguous');
+    a.turns[1] = conversation(30, 'Postgres hosting', '2026-11-04T10:00:00.000Z').turns[0]; a.turns[1].ordinal = 1;
+    expect((await retrieveMemory(store([a]), opts('Recall Postgres hosting'))).status).toBe('ambiguous');
+  });
+  it('Gate 7A missing mixed history never supplies a fabricated baseline', async () => {
+    const query = challengeCases[1][0]; const memory = await retrieveMemory(store([]), opts(query));
+    expect(memory.status).toBe('not_found');
+    const response = await runAgent({ message: query }, { memory, signal: new AbortController().signal,
+      provider: { contextWindowTokens: 65536, complete: async () => ({ text: '{"comparisons":[{"kind":"price"}]}', toolCalls: [], finishReason: 'stop' }) } });
+    expect(response.answer).toContain('Cannot verify');
+  });
   it('recalls other conversations without IDs, preserving exact originals, evidence and ordering', async () => {
     const a = conversation(10); const b = conversation(20, 'Other subject');
     const found = await retrieveMemory(store([b,a]), opts('Summarize our earlier Postgres hosting discussion.'));

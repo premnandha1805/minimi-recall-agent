@@ -6,7 +6,7 @@ also runs the assertions but does not overwrite that report. No credentials or
 network access are required: the injected transport rejects unexpected destinations.
 Frozen synthetic prices are not claims about actual vendors or plans.
 
-The 26 HTTP cases exercise real Fastify admission, restarted JSON storage,
+The 29 HTTP cases exercise real Fastify admission, restarted JSON storage,
 historical/date retrieval, Azure response parsing, agent/tool orchestration, Tavily
 parsing, verification, SSE encoding and browser stream validation. F2/F3 exercise
 the actual agent cancellation/deadline machinery with a virtual clock instead of
@@ -22,7 +22,23 @@ proof of resistance to an adversarial live model. Relative dates use a frozen
 Setup occurs outside the timed interval. Random storage identities do not affect
 assertions; report identities and timings may differ between runs.
 
-## Observed run
+## Gate 7A regression update
+
+The suite now contains 31 frozen cases. G7A1–G7A3 use the exact three challenge
+questions through restarted storage and HTTP orchestration. They assert the
+selected original discussion, historical date, complete five-product shortlist,
+and comparison routing before scripted current research. Their expected Cannot
+verify reflects deliberately unsupported comparison evidence, not failed recall.
+The existing evidence grammar and three known usefulness failures are unchanged.
+The recorded Gate 7A run has 31/31 structural/safety passes and 28/31 usefulness
+passes, with 48 scripted model requests and 19 searches. C6, C7 and C8 remain
+the usefulness failures. The full regression run passed 617 tests with one skip
+across 22 files; server/browser typechecks passed. Following the final stop-word
+concatenation cleanup, the 118 affected context/date/verification tests and all
+31 evaluation cases passed again. These remain offline application outcomes,
+not live model accuracy or latency measurements.
+
+## Previous 28-case observed run (before Gate 7A)
 
 | Category | Cases | Structural/safety pass | Usefulness pass |
 | --- | ---: | ---: | ---: |

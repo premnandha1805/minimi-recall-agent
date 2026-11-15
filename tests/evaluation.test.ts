@@ -43,7 +43,7 @@ async function evaluate(c: EvalCase): Promise<Row> {
         const copies = c.mode === 'ambiguous' ? 2 : 1;
         for (let n = 0; n < copies; n++) {
           const conversation = await store.create(c.timezone ?? 'UTC');
-          const turn = await store.addTurn(conversation.id, { key: 'baseline', content: c.category === 'comparison' ? `${c.product ?? 'Neon'} Postgres pricing recommendation` : 'CRM shortlist' });
+          const turn = await store.addTurn(conversation.id, { key: 'baseline', content: c.baselineQuestion ?? (c.category === 'comparison' ? `${c.product ?? 'Neon'} Postgres pricing recommendation` : 'CRM shortlist') });
           const attempt = await store.startAttempt(conversation.id, turn.id, 'baseline');
           const evidence = { id: 'S1', query: 'baseline', title: 'Synthetic frozen baseline', url: `https://${c.product === 'Acme' ? 'acme.example' : 'neon.tech'}/pricing`,
             text: c.old ?? 'Recorded shortlist: ' + shortlist, retrieved_at: c.timestamp ?? oldInstant };
@@ -67,6 +67,13 @@ async function evaluate(c: EvalCase): Promise<Row> {
         const messages = JSON.parse(String(init?.body)).messages as { role: string; content: string }[];
         const data = messages.find((m) => m.role === 'user' && m.content.startsWith('{"untrustedHistoricalData"'));
         const memory = data ? JSON.parse(data.content).untrustedHistoricalData : undefined;
+        if (c.historicalDay) {
+          expect(memory).toMatchObject({ status: 'found', memoryOnly: false, temporal: { localStart: c.historicalDay } });
+          expect(memory.records).toHaveLength(1);
+          expect(memory.records[0].user.content).toBe(c.baselineQuestion);
+          expect(memory.records[0].assistant.content).toBe(shortlist);
+          expect(messages.some((m) => m.role === 'system' && m.content.includes('comparisons'))).toBe(true);
+        }
         if (c.category === 'recall') {
           if (memory?.status === 'ambiguous') return json(wire('Historical matches are ambiguous; please narrow the conversation.'));
           const record = memory?.records[0]; selected = !!record?.assistant?.content.includes(shortlist);

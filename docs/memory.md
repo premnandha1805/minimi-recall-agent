@@ -245,12 +245,20 @@ messages receive bounded date hints anchored to their own original timestamps;
 missing old timezone is explicitly labeled as assumed. Those hints are external
 event-date metadata, never recursive conversation retrieval instructions.
 
-Matching requires all normalized topic keywords, with explicit Postgres/PostgreSQL
-and CRM/CRMs equivalences. Calendar-day filters apply to original user-message
+Historical locator clauses are separated from current-verification instructions;
+bounded calendar expressions are passed to the existing resolver. Thus a later
+"still correct today" clause does not override the date of the earlier discussion.
+Matching requires normalized entity/topic anchors, with explicit Postgres/PostgreSQL
+and CRM/CRMs equivalences. Conversational filler is removed; descriptive terms
+contribute to rank, with at least half of the remaining terms required. Generic
+terms alone cannot establish a topic, and date-free anchorless queries cannot
+select arbitrary history. Calendar-day filters apply to original user-message
 instants in the request timezone. Rank by date/keyword overlap, then recency;
 break ties by conversation ID, ordinal and turn ID. A directly adjacent followup
 starting with a supported reference word may be included as separately labeled
-context. Multiple anchor matches retain ambiguity. This lexical method can miss
+context. Contiguous related server turns on one local day in one conversation
+form one discussion; gaps, different days, competing conversations and separate
+seed records retain ambiguity. This lexical method can miss
 paraphrases, inflections or implicit references; absence is not proof that a
 discussion never occurred. No measured accuracy improvement is claimed.
 
