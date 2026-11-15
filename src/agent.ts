@@ -60,7 +60,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       !Number.isInteger(options.provider.contextWindowTokens) || options.provider.contextWindowTokens < 4096 ||
       options.provider.contextWindowTokens > 1_000_000) { observeTotal(); return result; }
   const deadline = createDeadlineScope(options.signal, Math.max(0, limits.data.deadlineMs - (now - startedAt)));
-  const search = new SearchSession(options.search, deadline.signal, startedAt, options.observe);
+  const search = new SearchSession(options.search, deadline.signal, startedAt, options.observe, parsed.data.message);
   const issues = new Set<string>();
   const seenCallIds = new Set<string>();
   const messages: ModelMessage[] = [

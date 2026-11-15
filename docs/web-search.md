@@ -48,6 +48,45 @@ up to the existing 2,000-character cap. The source registry and model receive th
 same truncated text; Tavily result IDs are ignored. `SearchSession` remains the
 owner of deterministic request-local `S1`, `S2`, ... IDs.
 
+### Request-local URL identity and relevance
+
+Before assigning IDs, `SearchSession` deduplicates validated sources using an
+internal URL key. Standard URL parsing normalizes host casing, default ports and
+the empty root path. Only the exact lowercase query keys `utm_source`,
+`utm_medium`, `utm_campaign`, `utm_term` and `utm_content` are removed from the
+key. Signed/tokenized queries (`sig`, `signature`, `token`, `x-amz-*`, `x-goog-*`)
+retain all parameters. Unknown parameters, parameter ordering/encoding, HTTP vs
+HTTPS, non-root trailing slashes and fragments (including PDF page selectors and
+hash routes) remain distinct. No title-based merging, redirect following, URL
+rewriting or publication-date inference occurs.
+
+The first retained occurrence owns the exact provider URL, title, dates and
+truncated text for the rest of this request. Repeated results reuse that source
+object and ID; each enclosing internal query outcome preserves retrieval-query
+provenance. Conflicting later snippets are not merged into or substituted for
+evidence already sent to the model. Sources are assigned in query order, never
+network completion order. Within a query, an explicitly requested `site:` match
+with lexical overlap and no year conflict is stably preferred; otherwise provider
+order is preserved. No existing source ID is renumbered in a later round.
+
+Internal tool outcomes include `relevance` assessments keyed by source ID. These
+carry bounded query-term overlap counts, explicit title/path year signals, and
+whether an explicit query `site:` constraint matches the hostname boundary.
+The original user question supplies lexical/year intent; the query is the fallback.
+Less than half of the selected terms matching, or an explicit year conflict, is
+marked `weak`; all other evidence remains `uncertain`, never verified. Multiple
+requested years remain temporally unknown. Publication years are not event years.
+These signals do not remove results or alter the public source/SSE schemas. The
+prompt asks the model to scrutinize entity, event and time period and disclose
+uncertainty. There is no general official-domain classifier, semantic relevance
+verifier, quotation check or demonstrated improvement in live accuracy.
+
+URL deduplication reduces registry/context duplication but does not avoid distinct
+queries: different queries can reveal additional evidence. Existing normalized
+query deduplication, provider-call counting and all execution limits remain intact.
+Frozen fixtures verify 15 returned records becoming 11 registry entries and nine
+becoming seven; these are synthetic offline cases, not measured live outcomes.
+
 Only HTTP/HTTPS source URLs without embedded credentials are accepted. Missing,
 blank or wrongly typed title/content, unsupported URLs, missing `results`, more
 than three results, invalid JSON/UTF-8 or oversized bodies reject the entire query.

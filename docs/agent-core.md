@@ -49,6 +49,12 @@ Source IDs are unique per run and assigned in query order. Unavailable search is
 an explicit tool result, not an empty successful search. Tests use labeled fixtures.
 Citation-ID validation is not claim support or quotation verification.
 
+The request-local registry now reuses IDs for equivalent source URLs, preserving
+the first exact evidence text and URL in every repeated tool result. Internal
+query outcomes retain per-query provenance and advisory relevance signals;
+the public registry/SSE shape is unchanged. See the conservative identity and
+relevance policy in [web-search.md](web-search.md#request-local-url-identity-and-relevance).
+
 ## Azure adapter scope
 
 The native-fetch adapter is limited to Azure OpenAI **v1 Chat Completions**, using

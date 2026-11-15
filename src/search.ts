@@ -3,6 +3,7 @@ import { createDeadlineScope, ExecutionTimeoutError, runWithSignal } from './exe
 import type { ModelTool } from './model.js';
 import type { AppConfig } from './config.js';
 import { abortOutcome, observeStage, sourceCounts, type StageObserver, type StageOutcome } from './observability.js';
+import { assessSource, sourceUrlKey, type RelevanceAssessment } from './source-integrity.js';
 
 export const SEARCH_LIMITS = Object.freeze({ rounds: 2, total: 8, firstRound: 5, secondRound: 3,
   concurrency: 2, timeoutMs: 4000, cutoffMs: 15_000 });
@@ -38,7 +39,7 @@ export interface Source extends SearchDocument { id: string; query: string }
  * failures count. The Tavily adapter below supplies real snippets and known dates. */
 export type WebSearch = (query: string, options: { signal: AbortSignal }) => Promise<SearchDocument[]>;
 export type SearchStatus = 'ok' | 'duplicate' | 'budget_exhausted' | 'cutoff' | 'unavailable' | 'timeout' | 'failed' | 'invalid_results';
-export interface SearchOutcome { query: string; status: SearchStatus; sources: Source[] }
+export interface SearchOutcome { query: string; status: SearchStatus; sources: Source[]; relevance?: RelevanceAssessment[] }
 
 export const MAX_TAVILY_RESPONSE_BYTES = 131_072;
 export type TavilyErrorCode = 'NOT_CONFIGURED' | 'INVALID_QUERY' | 'BAD_REQUEST' | 'UNAUTHORIZED' |
@@ -198,9 +199,10 @@ export class SearchSession {
   private readonly seen = new Set<string>();
   private reserved = 0;
   private timedOut = false;
+  private readonly sourcesByUrl = new Map<string, Source>();
 
   constructor(private readonly search: WebSearch | undefined, private readonly signal: AbortSignal,
-    private readonly startedAt: number, private readonly observe?: StageObserver) {}
+    private readonly startedAt: number, private readonly observe?: StageObserver, private readonly intent = '') {}
 
   async runRound(groups: string[][]): Promise<SearchOutcome[][]> {
     const startedAt = performance.now();
@@ -286,9 +288,29 @@ export class SearchSession {
     };
     await Promise.all(Array.from({ length: SEARCH_LIMITS.concurrency }, worker));
     this.signal.throwIfAborted();
-    for (const outcome of outcomes.flat()) for (const source of outcome.sources) {
-      source.id = `S${this.sources.length + 1}`;
-      this.sources.push(source);
+    for (const outcome of outcomes.flat()) {
+      // Prefer a query's explicit site only when the snippet overlaps the intent
+      // and has no explicit year conflict. Stable sort retains provider order otherwise.
+      const priority = (source: Source) => {
+        const assessment = assessSource(outcome.query, this.intent, source);
+        return assessment.requestedSite === true && assessment.queryTermsMatched > 0 && assessment.year !== 'conflict' ? 1 : 0;
+      };
+      outcome.sources.sort((a, b) => priority(b) - priority(a));
+      const unique = new Map<string, Source>();
+      for (const candidate of outcome.sources) {
+        const key = sourceUrlKey(candidate.url);
+        let source = this.sourcesByUrl.get(key);
+        if (!source) {
+          source = { ...candidate, id: `S${this.sources.length + 1}` };
+          this.sourcesByUrl.set(key, source);
+          this.sources.push(source);
+        }
+        // Reuse the first exact evidence text, URL, dates and ID. The enclosing
+        // outcome.query preserves repeat-query provenance without new registry IDs.
+        unique.set(key, source);
+      }
+      outcome.sources = [...unique.values()];
+      if (outcome.sources.length) outcome.relevance = outcome.sources.map((source) => assessSource(outcome.query, this.intent, source));
     }
     return outcomes;
   }

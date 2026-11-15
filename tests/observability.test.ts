@@ -61,11 +61,11 @@ describe('bounded, privacy-safe agent stage observations (offline)', () => {
     expect(log.events.filter((e) => e.stage === 'search_provider').map((e) => e.call).sort()).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(log.events.filter((e) => e.stage === 'search_provider').every((e) => e.durationMs === 20)).toBe(true);
     expect(log.events.filter((e) => e.stage === 'search_round')).toEqual([
-      { stage: 'search_round', round: 1, durationMs: 60, outcome: 'failure', searchCalls: 5, sourceCount: 5, uniqueSourceUrls: 1 },
-      { stage: 'search_round', round: 2, durationMs: 40, outcome: 'failure', searchCalls: 3, sourceCount: 3, uniqueSourceUrls: 1 },
+      { stage: 'search_round', round: 1, durationMs: 60, outcome: 'failure', searchCalls: 5, sourceCount: 1, uniqueSourceUrls: 1 },
+      { stage: 'search_round', round: 2, durationMs: 40, outcome: 'failure', searchCalls: 3, sourceCount: 0, uniqueSourceUrls: 0 },
     ]);
     expect(log.events.at(-1)).toMatchObject({ stage: 'agent', durationMs: 130, outcome: 'success',
-      agentStatus: 'partial', sourceCount: 8, uniqueSourceUrls: 1, modelCalls: 3, searchCalls: 8 });
+      agentStatus: 'partial', sourceCount: 1, uniqueSourceUrls: 1, modelCalls: 3, searchCalls: 8 });
     expect(log.events.filter((e) => e.stage === 'final_synthesis')).toHaveLength(1);
     expect(JSON.stringify(log.events)).not.toMatch(/PRIVATE|https:|queries|Evidence/);
     expect(log.events.find((e) => e.stage === 'model_call')?.usage).toEqual({

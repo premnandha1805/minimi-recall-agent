@@ -258,7 +258,7 @@ describe('Tavily through the existing agent and budget owner', () => {
     const run = session.runRound([['0', '1'], ['2', '3', '4']]);
     await flush(); expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const index of [1, 2, 3, 4, 0]) {
-      pending[index].resolve(json({ results: [fixture({ title: String(index) })] })); await flush();
+      pending[index].resolve(json({ results: [fixture({ title: String(index), url: `https://example.com/${index}` })] })); await flush();
     }
     await run; expect(peak).toBe(2);
     expect(session.sources.map(({ id, title }) => [id, title])).toEqual(['0', '1', '2', '3', '4'].map((q, i) => [`S${i + 1}`, q]));
