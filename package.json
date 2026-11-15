@@ -24,6 +24,7 @@
     "vitest": "5.1.0"
   },
   "dependencies": {
+    "chrono-node": "2.10.3",
     "fastify": "5.12.8",
     "zod": "4.6.7"
   }
