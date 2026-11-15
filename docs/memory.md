@@ -1,8 +1,8 @@
 # Durable conversation storage — Gate 2, Milestone 1
 
 `src/memory.ts` now connects to Fastify through `src/memory-http.ts`. The browser now restores server conversations and sends explicit complete-answer
-receipts. Automatic context retrieval
-and historical/current comparison remain outstanding.
+receipts. Deterministic bounded context retrieval is now connected to chat;
+historical/current factual comparison remains outstanding.
 
 ## Ownership and schema
 
@@ -124,7 +124,7 @@ invalid state transitions and duplicate stored identities fail explicitly.
 fixtures. It exercises replacement, failure preservation, recovery, limits,
 idempotency, privacy-safe errors, turn order and concurrency without providers.
 
-Later milestones must add bounded context retrieval. The standalone temporal resolver still needs chat integration.
+The temporal resolver now supplies supported recall anchors during context retrieval.
 Quotation/change verification and true token streaming remain separate outstanding
 requirements. This isolated storage service does not complete Gate 2 or Gate 1's
 live acceptance requirements.
@@ -218,3 +218,69 @@ one local user's server, with no public-deployment authentication.
 UI suites explicitly disable persistence to retain their layout/interaction test
 boundaries. Real browser geometry, storage restrictions and multiple real browser
 windows still require manual evaluation; DOM tests do not prove those behaviors.
+
+## Milestone 5 historical retrieval and context
+
+`src/context.ts` is an internal deterministic function, not an external model tool.
+Recognized recall questions scan at most 100 conversations / 150,000 stored records
+under the original request deadline. Ordinary questions load active conversation
+continuity only. Whole turns include original user messages and accepted assistant
+answers/evidence; pending, failed, partial and cancelled assistants remain excluded.
+An assistant completed after the original request's reference is also excluded.
+Client-seeded records retain their original role/text, separate IDs and unverified
+provenance. No histories are written or synthesized by retrieval.
+
+Supported recall patterns include "What did I/we ...", "Which ... did we ...",
+"Summarize our earlier/previous ...", "recall" and "remember". Temporal phrases
+are extracted conservatively and passed to dates.ts. Bare weekdays mean the most
+recent occurrence on/before the reference local day; "last weekday" is strictly
+before it. Last week is the previous Monday-through-Sunday week. Multiple hints,
+numeric date ambiguity and unsupported expressions require clarification. External
+fact questions are not interpreted as requests for dated conversations.
+
+The captured reference is the original server user-message UTC timestamp and
+stored turn timezone (UTC fallback for missing legacy timezone), reused on retries.
+Local time and UTC reference are supplied to the model. Relative mentions in old
+messages receive bounded date hints anchored to their own original timestamps;
+missing old timezone is explicitly labeled as assumed. Those hints are external
+event-date metadata, never recursive conversation retrieval instructions.
+
+Matching requires all normalized topic keywords, with explicit Postgres/PostgreSQL
+and CRM/CRMs equivalences. Calendar-day filters apply to original user-message
+instants in the request timezone. Rank by date/keyword overlap, then recency;
+break ties by conversation ID, ordinal and turn ID. A directly adjacent followup
+starting with a supported reference word may be included as separately labeled
+context. Multiple anchor matches retain ambiguity. This lexical method can miss
+paraphrases, inflections or implicit references; absence is not proof that a
+discussion never occurred. No measured accuracy improvement is claimed.
+
+Recall selects at most eight whole records with a 32 KiB serialized memory-context
+budget, also checked by the existing conservative contextFits calculation including
+the system prompt, question, tools and reserved output. Active continuity uses full
+eligible records if they fit the existing context window (without the recall-only
+32 KiB cap), otherwise a recent whole-turn suffix with an explicit
+omission count. Essential recall turns are never cut mid-shortlist: if they cannot
+fit, return a limitation asking for a narrower request. This is not exact tokenization.
+The existing 65,536-byte/context-window limits still apply to each model call.
+
+Historical originals and source snapshots stay unchanged on disk and in retrieval
+results. Model-context projection replaces citation markers with qualified
+`history:conversation:turn:S#` labels, preserving original IDs and provenance.
+Historical sources never enter the current SearchSession registry or the public
+answer source list. Reopen the original answer for historical source links. Stored
+data is JSON in a user-role message, never a system instruction; prompts explicitly
+reject stored instructions and forbid treating old assistant statements as facts.
+These boundaries do not establish claim-level factual or quotation verification.
+
+Pure recognized recall disables web_search. Missing records, unsupported date
+references and coverage/context limits produce fixed honest answers without model
+or search calls. Found records use the same bounded agent loop for synthesis.
+Mixed current-information requests retain Tavily through the existing single tool.
+Storage failures fail explicitly, never as invented "not found" success. Retrieval
+has a disposable arrival-deadline scope, and elapsed time is rechecked before model
+execution. Limits remain three model calls, two rounds, 5+3 searches and 25 seconds.
+No public response shapes, receipt rules or SSE event framing changed.
+
+`tests/context.test.ts` uses frozen records plus a restart/HTTP test with mocked
+providers. Live recall quality and latency remain unmeasured; this milestone does
+not implement historical change/quotation verification or true token streaming.

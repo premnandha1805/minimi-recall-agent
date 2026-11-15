@@ -118,9 +118,11 @@ export function createTemporalResolver(options: { timezone: string } &
     const ago = lower.match(/^(\d{1,6}) days? ago$/);
     if (lower === 'today') { /* current local calendar day, including the unelapsed portion */ }
     else if (lower === 'yesterday') start = calendarDay(ordinal(today) - 1);
-    else if (lower === 'last tuesday') {
+    else if (/^(?:last )?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/.test(lower)) {
       const weekday = new Date(ordinal(today) * CALENDAR_DAY).getUTCDay();
-      start = calendarDay(ordinal(today) - ((weekday - 2 + 7) % 7 || 7));
+      const wanted = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'].indexOf(lower.replace(/^last /, ''));
+      const distance = (weekday - wanted + 7) % 7;
+      start = calendarDay(ordinal(today) - (distance || (lower.startsWith('last ') ? 7 : 0)));
     } else if (lower === 'last week') {
       const weekday = new Date(ordinal(today) * CALENDAR_DAY).getUTCDay();
       start = calendarDay(ordinal(today) - ((weekday + 6) % 7) - 7); days = 7;

@@ -20,7 +20,8 @@ The architecture and remaining acceptance requirements below remain the target.
 implements durable turn/attempt records and evidence snapshots with bounded local
 storage and explicit receipt states ([storage contract](docs/memory.md)). It is now
 connected to Fastify chat with explicit receipt/recovery endpoints. Browser
-restoration, receipt submission and temporal/context integration remain outstanding. This does not change the
+restoration and receipts are implemented; bounded temporal/context retrieval now
+uses stored original turns across conversations. This does not change the
 interim SSE contract or establish quotation/factual verification.
 
 - **One external tool:** `web_search`, implemented through a replaceable Tavily adapter. The model decides when to search; **code** enforces **2 rounds / 8 provider queries** (up to **5** first round, **3** second), query deduplication and bounded concurrency. History/date functions are internal, not extra tools.

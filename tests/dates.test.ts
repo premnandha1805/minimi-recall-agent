@@ -24,6 +24,11 @@ describe('deterministic temporal resolver (frozen instants, no providers)', () =
   ])('yesterday crosses month/year/leap boundaries: %s', (instant, expected) => {
     expect(resolve('yesterday', instant)).toMatchObject({ status: 'resolved', localStart: expected });
   });
+  it('bare weekdays include today, while last weekdays strictly precede it', () => {
+    expect(resolve('Tuesday')).toMatchObject({ localStart: '2026-11-17' });
+    expect(resolve('Monday')).toMatchObject({ localStart: '2026-11-16' });
+    expect(resolve('last Monday')).toMatchObject({ localStart: '2026-11-16' });
+  });
   it('today uses the reference local day rather than the UTC day', () => {
     expect(resolve('today', '2026-01-01T00:30:00Z', 'America/Los_Angeles')).toMatchObject({
       localStart: '2025-12-31', localEndExclusive: '2026-01-01', startUtc: '2025-12-31T08:00:00.000Z' });
@@ -108,7 +113,7 @@ describe('deterministic temporal resolver (frozen instants, no providers)', () =
     expect(r.resolve('The Nobel Prize was announced on 3 November 2025', 'conversation')).toMatchObject({ status: 'unsupported' });
     expect(r.resolve('2025 Nobel Prize', 'external_event')).toMatchObject({ status: 'unsupported' });
   });
-  it.each(['last month', 'Tuesday', 'next week', 'today at 01:30', '03 November CST', '', 'x'.repeat(257), '2026-13-01'])('reports unsupported/invalid expressions rather than using parser guesses: %s', (text) => {
+  it.each(['last month', 'next week', 'today at 01:30', '03 November CST', '', 'x'.repeat(257), '2026-13-01'])('reports unsupported/invalid expressions rather than using parser guesses: %s', (text) => {
     expect(resolve(text).status).not.toBe('resolved');
   });
   it.each(['not-an-instant', '2026-11-15', '2025-02-29T00:00:00Z'])('rejects invalid references: %s', (reference) => {

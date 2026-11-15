@@ -5,9 +5,10 @@ import type { Writable } from 'node:stream';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { ZodError } from 'zod';
 import { type AppConfig, loadConfig } from './config.js';
-import { createExecution, runWithSignal } from './execution.js';
+import { createExecution, runWithSignal, ExecutionTimeoutError } from './execution.js';
 import { authoritativeHistory, installMemoryHttp } from './memory-http.js';
 import { MemoryError } from './memory.js';
+import { retrieveMemory } from './context.js';
 import { runAgent } from './agent.js';
 import { createModelProvider } from './model.js';
 import { createTavilySearch } from './search.js';
@@ -300,12 +301,13 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     let turnId: string | undefined;
     let attemptId: string | undefined;
     let awaitingReceipt = false;
+    let storageFailure: 'STORAGE' | 'TIMEOUT' = 'STORAGE';
     try {
       request.executionSignal.throwIfAborted();
       if (parsed.data.history) await store.seed(conversation.id, parsed.data.history);
       request.executionSignal.throwIfAborted();
       const turn = await store.addTurn(conversation.id, { key: parsed.data.turn?.key ?? randomUUID(),
-        content: parsed.data.message, timezone: parsed.data.timezone });
+        content: parsed.data.message, timezone: parsed.data.timezone ?? conversation.timezone ?? 'UTC' });
       turnId = turn.id;
       const attempt = await store.startAttempt(conversation.id, turn.id, parsed.data.turn?.attemptKey ?? randomUUID());
       attemptId = attempt.id;
@@ -335,9 +337,13 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         await stream.ready();
         const owner = stream;
         const { turn: _turn, ...agentInput } = parsed.data;
+        const historical = await retrieveMemory(store, { query: turn.user.content, activeConversationId: conversation.id, currentTurnId: turn.id,
+          referenceInstant: turn.user.timestamp, timezone: turn.timezone ?? conversation.timezone ?? 'UTC',
+          signal: request.executionSignal, startedAt: request.executionStartedAt, deadlineMs: config.REQUEST_DEADLINE_MS });
         const history = authoritativeHistory((await store.load(conversation.id))!, parsed.data.history ?? [], turn.ordinal);
         request.executionSignal.throwIfAborted();
         const result = await runAgent({ ...agentInput, history, message: turn.user.content }, {
+          memory: historical,
           provider: { contextWindowTokens: provider.contextWindowTokens, complete: async (input) => {
             await owner.progress('model_started'); input.signal.throwIfAborted(); return provider.complete(input);
           } },
@@ -366,15 +372,16 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
             result.reason === 'cancelled' ? 'cancelled' : 'failed', result.reason === 'deadline' || result.reason === 'model_timeout' ? 'TIMEOUT' : 'MODEL_FAILED');
           stream.fail(agentErrorCode(result.reason));
         }
-      } catch {
-        if (stream) stream.fail('INTERNAL_ERROR');
+      } catch (error) {
+        if (error instanceof ExecutionTimeoutError) storageFailure = 'TIMEOUT';
+        if (stream) stream.fail(storageFailure === 'TIMEOUT' ? 'REQUEST_TIMEOUT' : 'INTERNAL_ERROR');
         else reply.raw.destroy();
       }
       return reply;
     } finally {
       try {
         if (turnId && attemptId && !awaitingReceipt) await store.stopAttempt(conversation.id, turnId, attemptId,
-          request.executionSignal.aborted ? 'cancelled' : 'failed', request.executionSignal.aborted ? 'CANCELLED' : 'STORAGE');
+          request.executionSignal.aborted ? 'cancelled' : 'failed', request.executionSignal.aborted ? 'CANCELLED' : storageFailure);
       } catch { request.log.error({ requestId: request.id }, 'Conversation finalization failed'); }
       memory.executing.delete(conversation.id);
     }

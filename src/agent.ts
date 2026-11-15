@@ -1,3 +1,4 @@
+import { prepareAgentContext, type RetrievedMemory } from './context.js';
 import { z } from 'zod';
 import { ChatRequestSchema, citationIds, type ChatRequest } from './contracts.js';
 import { createDeadlineScope, ExecutionTimeoutError, runWithSignal } from './execution.js';
@@ -29,6 +30,7 @@ export interface AgentResult {
 }
 export interface AgentOptions {
   provider: ModelProvider;
+  memory?: RetrievedMemory;
   signal: AbortSignal;
   search?: WebSearch;
   /** Monotonic request-arrival time, if already known by the caller. */
@@ -63,7 +65,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
   const search = new SearchSession(options.search, deadline.signal, startedAt, options.observe, parsed.data.message);
   const issues = new Set<string>();
   const seenCallIds = new Set<string>();
-  const messages: ModelMessage[] = [
+  let messages: ModelMessage[] = [
     { role: 'system', content: AGENT_SYSTEM_PROMPT },
     // Preserve the supplied original history. Reject oversized context rather than silently
     // dropping anchors; date/keyword-based history selection belongs to the memory feature.
@@ -71,7 +73,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       content: JSON.stringify({ timestamp: message.timestamp, content: message.content }) })),
     { role: 'user', content: parsed.data.message },
   ];
-  let toolsEnabled = true;
+  let toolsEnabled = !options.memory?.memoryOnly;
   const finish = (reason: AgentStopReason, answer?: string): AgentResult => {
     result.reason = reason;
     result.status = reason === 'cancelled' ? 'cancelled' :
@@ -84,7 +86,19 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
     return finish(reason);
   };
   try {
+    deadline.signal.throwIfAborted();
+    if (options.memory) {
+      const memory = options.memory;
+      if (memory.memoryOnly && memory.status === 'not_found') return finish('answer', 'I did not find a suitable record in the stored conversations. No historical details have been inferred.');
+      if (memory.memoryOnly && memory.status === 'unsupported_date') return finish('answer', 'The historical date reference is ambiguous or unsupported. Please specify an ISO date or a supported calendar expression and timezone.');
+      if (memory.memoryOnly && memory.status === 'limited') return finish('answer', memory.limitation ?? 'Historical coverage is limited. Please narrow the date or topic.');
+      const prepared = prepareAgentContext(memory, parsed.data.message, options.provider.contextWindowTokens,
+        Math.min(AGENT_LIMITS.maxOutputTokens, limits.data.outputTokenBudget));
+      if (!prepared.messages.length) return finish('answer', prepared.limitation);
+      messages = prepared.messages;
+    }
     for (let step = 0; step < AGENT_LIMITS.modelCalls; step++) {
+      if (performance.now() - startedAt >= limits.data.deadlineMs) return finish('deadline');
       deadline.signal.throwIfAborted();
       const remaining = limits.data.outputTokenBudget - result.stats.reservedOutputTokens;
       if (remaining <= 0) return finish('output_budget');
