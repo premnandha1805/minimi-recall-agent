@@ -965,6 +965,10 @@ export function createChatApp(options = {}) {
    * @param {import('./api.js').ChatHistoryItem[]} historySnapshot
    */
   async function executeChatSubmission(targetSession, loadingEntryId, promptText, historySnapshot) {
+    const loadingIndex = targetSession.entries.findIndex((item) => item.id === loadingEntryId);
+    const loadingEntry = targetSession.entries[loadingIndex];
+    const userEntry = targetSession.entries[loadingIndex - 1];
+    if (loadingEntry?.kind !== 'loading' || userEntry?.kind !== 'user') return;
     const requestToken = ++nextRequestToken;
     /** @type {{ controller: AbortController, sessionId: string, requestToken: number, abortReason: 'user' | 'navigation' | null }} */
     const requestState = {
@@ -1057,6 +1061,9 @@ export function createChatApp(options = {}) {
       },
     );
 
+    // A completion owns only the loading slot that started it. A newer attempt
+    // may already have replaced that slot after cancellation.
+    if (targetSession.entries.find((item) => item.id === loadingEntryId) !== loadingEntry) return;
     if (activeRequest?.requestToken === requestToken) {
       activeRequest = null;
     }
@@ -1067,7 +1074,7 @@ export function createChatApp(options = {}) {
 
     const isCurrentActiveSession = activeSession.id === targetSession.id;
     const abortedByNavigation = requestState.abortReason === 'navigation';
-    const shouldAnnounceAndFocus = isCurrentActiveSession && !abortedByNavigation;
+    const shouldAnnounceAndFocus = isCurrentActiveSession && !abortedByNavigation && activeRequest === null;
 
     const index = targetSession.entries.findIndex((item) => item.id === loadingEntryId);
     /** @param {ThreadEntry} replacement */
@@ -1084,7 +1091,10 @@ export function createChatApp(options = {}) {
       replaceEntry({ id: loadingEntryId, kind: 'assistant', text: answer.message.content,
         timestamp: answer.message.timestamp, result: answer });
       if (answer.coverage === 'complete' && !targetSession.history.some((item) => item.id === answer.message.id)) {
-        targetSession.history.push({ ...answer.message });
+        // Completion time is not turn order: an older retry belongs immediately
+        // after its original user message, before any later user/assistant turns.
+        const userIndex = targetSession.history.findIndex((item) => item.id === userEntry.id && item.role === 'user');
+        if (userIndex >= 0) targetSession.history.splice(userIndex + 1, 0, { ...answer.message });
       }
       if (shouldAnnounceAndFocus) announce(answer.coverage === 'complete' ? 'Answer received.' : 'Answer received with partial research.');
     } else if (result.kind === 'stream_error' || result.kind === 'protocol_error') {
@@ -1260,6 +1270,14 @@ export function createChatApp(options = {}) {
     }
     const targetSession = activeSession;
     const index = targetSession.entries.findIndex((item) => item.id === entry.id);
+    // Detached buttons from a previous render must not retry a successful or
+    // superseded response. Resolve association by ID, never by prompt text.
+    if (index < 0 || targetSession.entries[index] !== entry) return;
+    const userEntry = targetSession.entries[index - 1];
+    if (userEntry?.kind !== 'user') return;
+    const userIndex = targetSession.history.findIndex((item) => item.id === userEntry.id && item.role === 'user');
+    if (userIndex < 0) return;
+    const historySnapshot = targetSession.history.slice(0, userIndex);
     if (index >= 0) {
       targetSession.entries.splice(index, 1, {
         id: entry.id,
@@ -1270,7 +1288,7 @@ export function createChatApp(options = {}) {
     isUserNearBottom = true;
     renderWorkspace();
     scrollToBottom({ force: true });
-    await executeChatSubmission(targetSession, entry.id, entry.retryPrompt, entry.retryHistory);
+    await executeChatSubmission(targetSession, entry.id, entry.retryPrompt, historySnapshot);
   }
 
   /** @param {'user' | 'navigation'} [reason] */
