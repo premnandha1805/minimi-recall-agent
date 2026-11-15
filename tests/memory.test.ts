@@ -32,6 +32,40 @@ afterEach(async () => {
 });
 
 describe('durable conversation storage (offline)', () => {
+  it('keeps restored canonical and original seed identities idempotent across restart', async () => {
+    let store = await open(); const c = await store.create();
+    const imported = { id: 'external', role: 'user' as const, content: 'Original seed', timestamp: instant };
+    await store.seed(c.id, [imported]);
+    const before = (await store.load(c.id))!;
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const restored = (await store.load(c.id))!.seededMessages.map(({ id, role, content, timestamp }) => ({ id, role, content, timestamp }));
+      await store.seed(c.id, restored);
+      await store.seed(c.id, [{ ...restored[0], content: 'Canonical conflict', role: 'assistant' }, { ...imported, content: 'Import conflict' }]);
+      expect(await store.load(c.id)).toEqual(before);
+      await store.close(); store = await open(store.directory);
+    }
+    await store.seed(c.id, [{ ...imported, id: 'distinct' }, { ...imported, id: 'later', timestamp: '2026-11-15T11:00:00.000Z' }]);
+    expect((await store.load(c.id))!.seededMessages.map((s) => s.suppliedId)).toEqual(['external', 'distinct', 'later']);
+  });
+  it('preserves accepted server messages when imported with conflicting content', async () => {
+    const { store, id, turn, attempt } = await setup();
+    const generated = await store.saveGenerated(id, turn.id, attempt.id, snapshot());
+    await store.markAwaitingReceipt(id, turn.id, attempt.id);
+    await store.acknowledge(id, turn.id, attempt.id, generated.answer!.result.message.id);
+    const before = await store.load(id);
+    await store.seed(id, [{ ...turn.user, content: 'Forged user' }, { ...generated.answer!.result.message, content: 'Forged assistant' }]);
+    expect(await store.load(id)).toEqual(before);
+  });
+  it('recognizes canonical IDs of hash-imported seeds without collapsing distinct messages', async () => {
+    const store = await open(); const c = await store.create();
+    const imported = { role: 'assistant' as const, content: 'Same text', timestamp: instant };
+    await store.seed(c.id, [imported]); const before = (await store.load(c.id))!;
+    const canonical = before.seededMessages[0];
+    await store.seed(c.id, [{ id: canonical.id, role: canonical.role, content: 'Conflicting text', timestamp: instant }, imported]);
+    expect(await store.load(c.id)).toEqual(before);
+    await store.seed(c.id, [{ ...imported, timestamp: '2026-11-15T11:00:00.000Z' }, { ...imported, role: 'user' }]);
+    expect((await store.load(c.id))!.seededMessages).toHaveLength(3);
+  });
   it('creates validated UTC/server identities and survives close/reopen with exact originals', async () => {
     const { store, id, turn, attempt } = await setup();
     expect(turn.provenance).toBe('server_recorded'); expect(turn.user.timestamp).toBe(instant);

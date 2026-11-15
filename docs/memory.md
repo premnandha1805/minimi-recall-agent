@@ -24,6 +24,10 @@ after later turns. Completion timestamps never determine logical order.
 including conflicting replay content. Repeated generated results preserve the
 original server snapshot. Seed imports merge by supplied message ID or SHA-256
 of `[role, normalized UTC timestamp, exact content]`; first stored copy wins.
+Restored canonical seed IDs also resolve to the existing seed, including when
+resubmitted content conflicts. Both import and canonical identities preserve the
+original record, order and client_seed provenance across restarts. Distinct
+supplied IDs remain distinct even when their text and timestamps are identical.
 Messages matching known server message IDs cannot replace or promote those records.
 Imports retain supplied order, supplied IDs separately, normalized original UTC
 timestamps, receipt times and `client_seed` provenance. Their canonical IDs are
@@ -137,6 +141,11 @@ live acceptance requirements.
   statuses, original messages and answer-scoped evidence snapshots.
 - `DELETE /api/conversations/:id` returns `{deleted}`; pending attempts must be
   resolved before deletion. Corrupt files are never silently deleted.
+  There is no deletion UI. From local PowerShell, use
+  `Invoke-RestMethod -Method Delete -Uri 'http://127.0.0.1:3000/api/conversations/YOUR-CONVERSATION-UUID'`
+  after replacing the UUID using `GET /api/conversations`. This explicitly deletes
+  that conversation's stored messages and snapshots. Clearing browser data or
+  starting a new conversation does not delete backend files.
 - `GET /api/conversations/:id/turns/:turnId/attempts/:attemptId/result` returns
   `{status,result}` for awaiting-receipt, accepted or delivered-partial attempts.
   It does not call providers, accept the answer, or promote interrupted generation.
@@ -187,6 +196,10 @@ The browser lists bounded stored conversations and loads the active server-owned
 UUID after refresh. Only `recall.activeConversation.v1` (one conversation ID) is
 kept in localStorage; message text, evidence and receipt state are never cached
 there. Earlier conversations are reopened by fetching their current server records.
+The interface discloses local server disk storage. Disabling browser restoration
+only keeps this view in the current session; it does not disable backend writes.
+Unsubmitted messages and failed admissions are not claimed saved, while error
+notices acknowledge that submitted messages may already exist on disk.
 Client-seeded records remain visibly labeled when their original sources are absent.
 Only accepted server answers enter restored assistant history; partial, cancelled,
 interrupted and pending attempts do not. Original logical turn order is retained.

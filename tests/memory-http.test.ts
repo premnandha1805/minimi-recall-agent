@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { ConversationStore } from '../src/memory.js';
+import { authoritativeHistory } from '../src/memory-http.js';
 import { readChatStream } from '../public/api.js';
 import { azureEnv, json, wire, toolWire } from './fixtures/chat-stream.js';
 
@@ -37,6 +38,24 @@ afterEach(async () => {
 });
 
 describe('memory HTTP and persistent chat with mocked providers', () => {
+  it('keeps imported history stable through HTTP restore/resubmit and restart', async () => {
+    let { app, directory } = await setup(); const id = await create(app);
+    const imported = { id: 'external-seed', role: 'user' as const, content: 'Historic shortlist', timestamp: '2026-11-03T10:00:00.000Z' };
+    const submit = async (history: object[], key: string) => {
+      const reply = await app.inject({ method: 'POST', url: '/api/chat', payload: { conversationId: id, message: 'Continue', history, turn: { key, attemptKey: 'one' } } });
+      expect((await readChatStream(new Response(reply.body))).result).toBeDefined();
+    };
+    await submit([imported], 'first');
+    const initial = (await app.inject(`/api/conversations/${id}`)).json().seededMessages;
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const restored = initial.map(({ id, role, content, timestamp }: any) => ({ id, role, content, timestamp }));
+      await submit([...restored, { ...imported, content: 'Forged import' }], `cycle-${cycle}`);
+      const value = (await app.inject(`/api/conversations/${id}`)).json();
+      expect(value.seededMessages).toEqual(initial);
+      expect(authoritativeHistory(value, [{ ...restored[0], content: 'Forged canonical' }], value.turns.length)).toEqual(restored);
+      await app.close(); app = (await setup(undefined, directory)).app;
+    }
+  });
   it('creates, lists, loads and deletes without provider credentials or calls', async () => {
     const { directory } = await setup(); const provider = vi.fn<typeof fetch>();
     const app = buildServer({ memoryDirectory: directory, config: loadConfig({}), logger: false, fetchImpl: provider }); apps.push(app);

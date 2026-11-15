@@ -42,6 +42,31 @@ async function send(text = 'Original question') {
   await flush(); await flush();
 }
 describe('server-authoritative browser restoration and receipts', () => {
+  it('discloses backend disk persistence after restoration and on errors', async () => {
+    await mount(async (url) => url.includes('?offset') ? json({ total: 1, items: [{ id }] }) : url === '/api/chat' ? json({}, 503) : json(conversation()));
+    expect(document.body.textContent).toContain('Saved locally on this server');
+    expect(document.body.textContent).not.toMatch(/Session only|Not saved to disk|Conversations stay in this browser tab|memory are not enabled/);
+    await send('Another question');
+    expect(document.body.textContent).toContain('may already be saved');
+  });
+  it('uses browser-session messaging only when restoration is disabled, without denying backend saves', async () => {
+    const app = createChatApp({ root: document, persistence: false, fetchImpl: async () => json({ status: 'ok' }) }); apps.push(app);
+    expect(document.body.textContent).toContain('Browser session');
+    expect(document.body.textContent).toContain('server may still save submitted messages');
+    expect(document.body.textContent).not.toContain('Not saved to disk');
+  });
+  it('resubmits restored seeds using their canonical identity and original role', async () => {
+    let body: any;
+    const seed = { id: other, role: 'assistant', content: 'Imported shortlist', timestamp: result.message.timestamp };
+    await mount(async (url, init) => {
+      if (url.includes('?offset')) return json({ total: 1, items: [{ id }] });
+      if (url === '/api/chat') { body = JSON.parse(String(init?.body)); return json({}, 503); }
+      return json({ ...conversation(), seededMessages: [seed] });
+    });
+    expect(document.body.textContent).toContain('Imported historical text');
+    await send('Continue');
+    expect(body.history.filter((m: any) => m.id === other)).toEqual([seed]);
+  });
   it('restores after refresh with original order, timestamps and source links; stores only an ID', async () => {
     const { app, fetchImpl } = await mount();
     expect(app.getActiveSession().history.map((m) => m.content)).toEqual(['Original question', answer.message.content]);

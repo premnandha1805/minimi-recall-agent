@@ -195,6 +195,14 @@ export function createChatApp(options = {}) {
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const listenerController = new AbortController();
   const persistence = options.persistence !== false;
+  // This option controls browser restoration, not the backend's storage policy.
+  for (const badge of doc.querySelectorAll('.session-scope-badge, #topbar-session-tag, .preview-badge, .thread-meta-badge')) {
+    badge.textContent = persistence ? 'Local server storage' : 'Browser session · restoration off';
+  }
+  if (!persistence) {
+    const disclosure = doc.querySelector('.preview-banner-copy');
+    if (disclosure) disclosure.textContent = 'This view lasts for this browser session; the server may still save submitted messages and source snapshots locally. Automatic conversation restoration is off.';
+  }
   let memoryBusy = false; let navigation = 0;
   /** @type {AbortController | undefined} */ let loadController;
   /** @type {Map<string, {key: string, attemptKey: string}>} */ const submissions = new Map();
@@ -615,7 +623,7 @@ export function createChatApp(options = {}) {
           doc,
           'p',
           'session-empty-note',
-          persistence ? 'No stored conversations loaded. New messages are saved on this server.' : 'Conversations stay in this browser tab until you refresh or close it.',
+          persistence ? 'No stored conversations loaded. Submitted messages are saved locally on this server.' : 'This view lasts for this browser session; the server may still save submitted messages.',
         ),
       );
       return;
@@ -671,7 +679,9 @@ export function createChatApp(options = {}) {
 
     const retained = el(doc, 'div', 'turn-retained');
     retained.appendChild(svgIcon(doc, 'M5 13L9 17L19 7', 13));
-    retained.appendChild(el(doc, 'span', '', 'Session only'));
+    retained.appendChild(el(doc, 'span', '', persistence ?
+      (memoryId(entry.id) ? 'Saved locally on this server' : 'Submission pending · local save not confirmed') :
+      'Browser session · server may still save submitted messages'));
     article.appendChild(retained);
 
     return article;
@@ -852,7 +862,7 @@ export function createChatApp(options = {}) {
     const guarantee = el(doc, 'div', 'retained-guarantee');
     guarantee.appendChild(svgIcon(doc, 'M5 13L9 17L19 7', 14));
     guarantee.appendChild(
-      el(doc, 'span', '', 'Your message is retained in this browser session (not saved to disk yet).'),
+      el(doc, 'span', '', 'Your message remains visible here and may already be saved locally on this server. Refresh conversations to check stored state.'),
     );
     card.appendChild(guarantee);
 

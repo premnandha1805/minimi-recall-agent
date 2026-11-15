@@ -70,11 +70,11 @@
           <div class="session-section">
             <div class="session-section-header">
               <span class="section-label">This Session</span>
-              <span class="session-scope-badge">Session only</span>
+              <span class="session-scope-badge">Local server storage</span>
             </div>
             <div id="session-list" class="session-list" role="navigation" aria-label="Session conversations">
               <p class="session-empty-note">
-                Conversations stay in this browser tab until you refresh or close it.
+                Submitted conversations and source snapshots are saved locally on this server.
               </p>
             </div>
           </div>
@@ -152,7 +152,7 @@
                 />
               </svg>
             </button>
-            <span id="topbar-session-tag" class="topbar-session-tag">Session only</span>
+            <span id="topbar-session-tag" class="topbar-session-tag">Local server storage</span>
             <div class="avatar-badge" title="Recall Agent">
               <img src="/icons/favicon.png" alt="Recall Agent icon" width="30" height="30" />
             </div>
@@ -183,8 +183,8 @@
               <p class="api-info-copy">
                 This interface sends validated prompts directly to
                 <code class="code-inline">POST /api/chat</code> and monitors
-                <code class="code-inline">GET /health</code>. Agent execution and persistent server
-                memory are not enabled in this build yet.
+                <code class="code-inline">GET /health</code>. Submitted messages and source snapshots
+                are stored as local files on this server. Model and search calls require configured credentials.
               </p>
               <div id="api-info-meta" class="api-info-meta">
                 <span>Checking server metadata…</span>
@@ -370,12 +370,13 @@
                 <div class="preview-banner-body">
                   <div class="preview-banner-title-row">
                     <span class="preview-banner-title">Conversational Web Search</span>
-                    <span class="preview-badge">Session only</span>
+                    <span class="preview-badge">Local server storage</span>
                   </div>
                   <p class="preview-banner-copy">
                     Ask a question to receive an answer with source links when web research is used.
                     Research progress appears while you wait; the answer arrives when complete.
-                    Conversations stay in this browser tab. Quotations and factual claims are not independently verified.
+                    Submitted conversations and source snapshots are saved locally on this server.
+                    Source checks do not establish full factual verification.
                   </p>
                 </div>
               </div>
@@ -386,7 +387,7 @@
                 <div class="thread-meta-left">
                   <span id="thread-conversation-id" class="thread-meta-id"></span>
                 </div>
-                <span class="thread-meta-badge">Session only · Not saved to disk</span>
+                <span class="thread-meta-badge">Local server storage</span>
               </div>
               <p id="omitted-history-note" class="thread-omitted-note" hidden role="status"></p>
               <div id="message-list" class="message-list"></div>

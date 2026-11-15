@@ -17,7 +17,7 @@ export function authoritativeHistory(value: Conversation, history: ChatHistoryMe
       }
     }
     const key = supplied.id ? `id:${supplied.id}` : `hash:${hash(supplied)}`;
-    const seed = value.seededMessages.find((s) => s.mergeKey === key);
+    const seed = value.seededMessages.find((s) => s.id === supplied.id || s.mergeKey === key);
     return seed ? [{ id: seed.id, role: seed.role, content: seed.content, timestamp: seed.timestamp }] : [];
   });
 }

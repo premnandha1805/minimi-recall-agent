@@ -296,7 +296,9 @@ export class ConversationStore {
         const serverMessages = v.turns.flatMap((t) => [t.user, ...t.attempts.flatMap((a) => a.answer ? [a.answer.result.message] : [])]);
         const matchesServer = serverMessages.some((m) => item.id ? item.id === m.id :
           mergeKey === `hash:${digest(JSON.stringify([m.role, new Date(m.timestamp).toISOString(), m.content]))}`);
-        if (matchesServer || v.seededMessages.some((s) => s.mergeKey === mergeKey)) continue;
+        // Restored seeds carry their canonical server ID, not their original import ID.
+        // Match identities before inspecting content: the stored original always wins.
+        if (matchesServer || v.seededMessages.some((s) => s.id === item.id || s.mergeKey === mergeKey)) continue;
         if (v.seededMessages.length >= MEMORY_LIMITS.seededMessages) throw new MemoryError('LIMIT');
         v.seededMessages.push({ id: this.id(), role: item.role, content: item.content, timestamp,
           provenance: 'client_seed', mergeKey, ...(item.id ? { suppliedId: item.id } : {}), receivedAtUtc: this.time() });

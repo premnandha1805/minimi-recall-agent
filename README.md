@@ -88,7 +88,19 @@ Original UTC messages and source snapshots live in private, gitignored
 Refresh/restart restoration uses server records; the browser keeps minimal identity.
 Receipt recovery does not repeat provider calls. Failed, partial and unaccepted
 answers are excluded from accepted historical answers. JSON files are plaintext,
-not encrypted. Use the UI to delete stored conversations; keep private data out
+not encrypted. The UI has no delete control. Delete a conversation through the
+local API using its UUID (listed by `GET /api/conversations`):
+
+```powershell
+# Replace YOUR-CONVERSATION-UUID with the intended conversation's ID.
+Invoke-RestMethod -Method Delete -Uri 'http://127.0.0.1:3000/api/conversations/YOUR-CONVERSATION-UUID'
+```
+
+Deletion refuses pending attempts; resolve them through the documented receipt
+API first (complete answers also have a Recover / retry receipt action). Failed
+or corrupt storage requires manual recovery as described in docs/memory.md.
+Starting a new conversation or clearing browser data does not delete server files.
+Keep private data out
 of submissions/backups shared with reviewers. This loopback-only app has no public
 deployment authentication. See [storage/recall limits](docs/memory.md).
 
