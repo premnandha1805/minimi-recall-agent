@@ -9,14 +9,18 @@ import { abortOutcome, observeStage, sourceCounts, tokenUsage, type StageObserve
 import { SEARCH_LIMITS, SearchArgumentsSchema, SearchSession, WEB_SEARCH_TOOL, type Source, type WebSearch } from './search.js';
 
 /** Select one exact contiguous excerpt; never join separated claims into a quotation. */
-function excerpt(text: string, query: string, size: number): string {
+function excerpt(text: string, query: string, size: number, preserveLineStart = false): string {
   if (text.length <= size) return text;
   const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [])];
   let best = 0; let score = -1;
-  for (let at = 0; at < text.length; at += Math.max(1, Math.floor(size / 2))) {
-    const window = text.slice(at, at + size).toLowerCase();
+  const starts = preserveLineStart ? [0, ...[...text.matchAll(/\n/g)].map((m) => m.index + 1)] :
+    Array.from({ length: Math.ceil(text.length / Math.max(1, Math.floor(size / 2))) }, (_, i) => i * Math.max(1, Math.floor(size / 2)));
+  for (const start of starts) {
+    // Comparison extraction must not turn "Not: The Neon ..." into an assertion
+    // by dropping the start of its line. Ending fragments fail the full-record parser.
+    const window = text.slice(start, start + size).toLowerCase();
     const overlap = terms.filter((term) => window.includes(term)).length;
-    if (overlap > score) { best = at; score = overlap; }
+    if (overlap > score) { best = start; score = overlap; }
   }
   return text.slice(best, best + size);
 }
@@ -176,7 +180,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
         let answer = response.text;
         // Historical citation markers are projected in model context; verify that
         // exact representation rather than the untouched on-disk snapshots.
-        if (changeRequest) answer = options.memory ? verifyChangeAnswer(response.text, memoryData(options.memory), search.sources, issues.size > 0) :
+        if (changeRequest) answer = options.memory ? verifyChangeAnswer(response.text, memoryData(options.memory), search.sources, issues.size > 0, parsed.data.message) :
           'Cannot verify: no supported historical baseline was supplied.';
         else if (/(?<!no )\bconfirmed change\b/i.test(answer)) answer = 'Cannot verify: a change verdict was not established by deterministic evidence comparison.';
         if (!checkSourceQuotations(answer, search.sources)) answer = 'Cannot verify: quotation warning: a cited quotation did not match the exact available source text. No unsupported quotation or change claim is accepted.';
@@ -218,7 +222,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       const reserve = search.rounds === 1 ? Math.min(8192, Math.floor(options.provider.contextWindowTokens / 4)) : 0;
       let toolMessages = encode();
       for (let size = 1000; !contextFits({ messages: [...messages, ...toolMessages], tools: [WEB_SEARCH_TOOL], maxOutputTokens: AGENT_LIMITS.maxOutputTokens }, options.provider.contextWindowTokens, reserve) && size >= 125; size = Math.floor(size / 2)) {
-        for (const source of fresh) source.text = excerpt(originals.get(source.id)!, `${parsed.data.message} ${source.query}`, size);
+        for (const source of fresh) source.text = excerpt(originals.get(source.id)!, `${parsed.data.message} ${source.query}`, size, changeRequest);
         contextLimitation = 'Research excerpts were shortened to fit the context budget; omitted text was not checked.';
         toolMessages = encode();
       }

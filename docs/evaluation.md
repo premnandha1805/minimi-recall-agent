@@ -22,7 +22,19 @@ proof of resistance to an adversarial live model. Relative dates use a frozen
 Setup occurs outside the timed interval. Random storage identities do not affect
 assertions; report identities and timings may differ between runs.
 
-## Gate 7A regression update
+## Gate 7D verification update
+
+The offline evaluation suite contains 31 frozen cases. Following Gate 7D's
+bounded natural-language pricing and feature verification, cases C6 (prose price
+increase) and C7 (prose price unchanged) now pass both safety and usefulness
+expectations. The recorded Gate 7D run has **31/31 structural/safety passes (100%)**
+and **30/31 usefulness passes (96.8%)**, with 48 scripted model requests and 19 searches.
+Only one restrictive abstention remains: C8 (fictional Acme domain outside the
+explicit official product whitelist).
+The full regression suite passed **687 tests with one skip** across 22 files;
+server/browser typechecks passed.
+
+## Gate 7A regression update (prior)
 
 The suite now contains 31 frozen cases. G7A1–G7A3 use the exact three challenge
 questions through restarted storage and HTTP orchestration. They assert the
