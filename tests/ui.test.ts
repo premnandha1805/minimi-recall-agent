@@ -22,6 +22,8 @@ interface CreateChatAppResult {
   getSessions: () => Array<{ id: string; title: string }>;
   waitForInitialHealth: () => Promise<unknown>;
   destroy: () => void;
+  isScrolledToBottom?: () => boolean;
+  scrollToBottom?: (options?: { force?: boolean }) => void;
 }
 
 const INDEX_HTML = readFileSync(resolve(import.meta.dirname, '..', 'public', 'index.html'), 'utf8');
@@ -1169,5 +1171,261 @@ describe('Recall Agent Chat UI (public/index.html + app.js + api.js)', () => {
     expect(document.activeElement).not.toBe(chatInput);
     app.startNewConversation();
     expect(document.activeElement).toBe(chatInput);
+  });
+
+  it('25. automatically scrolls to latest message when user sends a prompt and tracks bottom state', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (input === '/health') return new Response('{"status":"ok"}', { status: 200 });
+      const body = JSON.parse(String(init?.body));
+      return new Response(streamText().replace(chatMeta.conversationId, body.conversationId), {
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    });
+
+    const app = await mountApp(fetchMock);
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+
+    expect(app.isScrolledToBottom?.()).toBe(true);
+
+    chatInput.value = 'First prompt';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+
+    expect(app.isScrolledToBottom?.()).toBe(true);
+    expect(document.querySelector('.assistant-answer-card')).not.toBeNull();
+  });
+
+  it('26. keeps view scrolled to bottom as streaming progress updates arrive', async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let conversationId = '';
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) { controller = c; },
+    });
+    const encoder = new TextEncoder();
+
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (input === '/health') return new Response('{"status":"ok"}', { status: 200 });
+      const body = JSON.parse(String(init?.body));
+      conversationId = body.conversationId;
+      return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } });
+    });
+
+    const app = await mountApp(fetchMock);
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+
+    chatInput.value = 'Stream progress test';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+
+    // Stream meta + accepted
+    controller.enqueue(encoder.encode(
+      `event: meta\ndata: {"version":"recall.chat.v1","requestId":"11111111-1111-4111-8111-111111111111","conversationId":"${conversationId}","answerMode":"final"}\n\n` +
+      'event: progress\ndata: {"phase":"accepted"}\n\n'
+    ));
+    await flushMicrotasks();
+    expect(app.isScrolledToBottom?.()).toBe(true);
+    expect(document.querySelector('.loading-label')?.textContent).toBe('Request accepted');
+
+    // Stream model progress
+    controller.enqueue(encoder.encode(
+      'event: progress\ndata: {"phase":"model_started","call":1}\n\n'
+    ));
+    await flushMicrotasks();
+    expect(app.isScrolledToBottom?.()).toBe(true);
+    expect(document.querySelector('.loading-label')?.textContent).toBe('Waiting for the model response…');
+
+    // Stream search progress
+    controller.enqueue(encoder.encode(
+      'event: progress\ndata: {"phase":"search_started","attempt":1}\n\n'
+    ));
+    await flushMicrotasks();
+    expect(app.isScrolledToBottom?.()).toBe(true);
+    expect(document.querySelector('.loading-label')?.textContent).toBe('Searching the web…');
+
+    // Stream result + done
+    controller.enqueue(encoder.encode(
+      'event: result\ndata: {"message":{"id":"msg_test","role":"assistant","content":"Done [S1]","timestamp":"2026-11-14T00:00:00.000Z"},"coverage":"complete","issues":[],"sources":[{"id":"S1","query":"q","title":"T","url":"https://example.com","retrieved_at":"2026-11-14T00:00:00Z"}],"evidenceCheck":"citation_ids_only"}\n\n' +
+      'event: done\ndata: {"outcome":"completed","messageId":"msg_test"}\n\n'
+    ));
+    controller.close();
+    await flushMicrotasks();
+
+    expect(app.isScrolledToBottom?.()).toBe(true);
+    expect(document.querySelector('.assistant-answer-card')).not.toBeNull();
+  });
+
+  it('27. preserves user scroll position when manually scrolled up during streaming and completion', async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let conversationId = '';
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) { controller = c; },
+    });
+    const encoder = new TextEncoder();
+
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (input === '/health') return new Response('{"status":"ok"}', { status: 200 });
+      const body = JSON.parse(String(init?.body));
+      conversationId = body.conversationId;
+      return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } });
+    });
+
+    const app = await mountApp(fetchMock);
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+
+    chatInput.value = 'Scroll up test';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+
+    // Stream meta + accepted
+    controller.enqueue(encoder.encode(
+      `event: meta\ndata: {"version":"recall.chat.v1","requestId":"11111111-1111-4111-8111-111111111111","conversationId":"${conversationId}","answerMode":"final"}\n\n` +
+      'event: progress\ndata: {"phase":"accepted"}\n\n'
+    ));
+    await flushMicrotasks();
+
+    // Simulate user manually scrolling up (e.g. reading past messages)
+    Object.defineProperty(document.documentElement, 'scrollHeight', { value: 2000, configurable: true });
+    Object.defineProperty(document.documentElement, 'clientHeight', { value: 500, configurable: true });
+    document.documentElement.scrollTop = 200;
+    document.dispatchEvent(new Event('scroll'));
+
+    expect(app.isScrolledToBottom?.()).toBe(false);
+
+    // Stream progress while user is scrolled up
+    controller.enqueue(encoder.encode(
+      'event: progress\ndata: {"phase":"model_started","call":1}\n\n'
+    ));
+    await flushMicrotasks();
+
+    // Scroll position should NOT be forced to bottom
+    expect(document.documentElement.scrollTop).toBe(200);
+    expect(app.isScrolledToBottom?.()).toBe(false);
+
+    // Complete response while user is scrolled up
+    controller.enqueue(encoder.encode(
+      'event: result\ndata: {"message":{"id":"msg_test","role":"assistant","content":"Done [S1]","timestamp":"2026-11-14T00:00:00.000Z"},"coverage":"complete","issues":[],"sources":[{"id":"S1","query":"q","title":"T","url":"https://example.com","retrieved_at":"2026-11-14T00:00:00Z"}],"evidenceCheck":"citation_ids_only"}\n\n' +
+      'event: done\ndata: {"outcome":"completed","messageId":"msg_test"}\n\n'
+    ));
+    controller.close();
+    await flushMicrotasks();
+
+    // Answer rendered, but user scroll position preserved at 200
+    expect(document.documentElement.scrollTop).toBe(200);
+    expect(app.isScrolledToBottom?.()).toBe(false);
+    expect(document.querySelector('.assistant-answer-card')).not.toBeNull();
+  });
+
+  it('28. resumes auto-scrolling when user scrolls back near the bottom', async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let conversationId = '';
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) { controller = c; },
+    });
+    const encoder = new TextEncoder();
+
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (input === '/health') return new Response('{"status":"ok"}', { status: 200 });
+      const body = JSON.parse(String(init?.body));
+      conversationId = body.conversationId;
+      return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } });
+    });
+
+    const app = await mountApp(fetchMock);
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+
+    chatInput.value = 'Resume scroll test';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+
+    // Simulate scrolled up
+    Object.defineProperty(document.documentElement, 'scrollHeight', { value: 2000, configurable: true });
+    Object.defineProperty(document.documentElement, 'clientHeight', { value: 500, configurable: true });
+    document.documentElement.scrollTop = 200;
+    document.dispatchEvent(new Event('scroll'));
+    expect(app.isScrolledToBottom?.()).toBe(false);
+
+    // User scrolls back near bottom: scrollTop = 1450 (distanceFromBottom = 2000 - 1950 = 50 <= 120)
+    document.documentElement.scrollTop = 1450;
+    document.dispatchEvent(new Event('scroll'));
+    expect(app.isScrolledToBottom?.()).toBe(true);
+
+    // Next progress update automatically scrolls to bottom
+    controller.enqueue(encoder.encode(
+      `event: meta\ndata: {"version":"recall.chat.v1","requestId":"11111111-1111-4111-8111-111111111111","conversationId":"${conversationId}","answerMode":"final"}\n\n` +
+      'event: progress\ndata: {"phase":"accepted"}\n\n'
+    ));
+    await flushMicrotasks();
+
+    expect(document.documentElement.scrollTop).toBe(2000);
+    expect(app.isScrolledToBottom?.()).toBe(true);
+    controller.close();
+  });
+
+  it('29. handles retry actions by resetting isUserNearBottom and scrolling to bottom', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (input === '/health') return new Response('{"status":"ok"}', { status: 200 });
+      return new Response(JSON.stringify({ error: { code: 'TEST_ERROR', message: 'Fail' } }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    const app = await mountApp(fetchMock);
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+
+    chatInput.value = 'Retry test';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+
+    // Notice card is rendered
+    const retryBtn = document.querySelector('[data-action="retry-request"]') as HTMLButtonElement;
+    expect(retryBtn).not.toBeNull();
+
+    // Simulate scrolled up
+    Object.defineProperty(document.documentElement, 'scrollHeight', { value: 1500, configurable: true });
+    Object.defineProperty(document.documentElement, 'clientHeight', { value: 500, configurable: true });
+    document.documentElement.scrollTop = 100;
+    document.dispatchEvent(new Event('scroll'));
+    expect(app.isScrolledToBottom?.()).toBe(false);
+
+    // Click retry
+    retryBtn.click();
+    await flushMicrotasks();
+
+    // Auto-scroll forced to bottom on retry
+    expect(app.isScrolledToBottom?.()).toBe(true);
+    expect(document.documentElement.scrollTop).toBe(1500);
+  });
+
+  it('30. avoids scrollIntoView and scrolls container directly without page jitter', async () => {
+    const scrollIntoViewSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoViewSpy;
+
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (input === '/health') return new Response('{"status":"ok"}', { status: 200 });
+      return new Response(streamText(), { headers: { 'Content-Type': 'text/event-stream' } });
+    });
+
+    const app = await mountApp(fetchMock);
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+
+    chatInput.value = 'No scrollIntoView test';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+
+    expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+    expect(app.isScrolledToBottom?.()).toBe(true);
   });
 });

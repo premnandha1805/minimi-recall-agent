@@ -15,6 +15,8 @@ export interface ChatAppInstance {
   getSessions: () => Array<{ id: string; title: string }>;
   waitForInitialHealth: () => Promise<unknown>;
   destroy: () => void;
+  isScrolledToBottom?: () => boolean;
+  scrollToBottom?: (options?: { force?: boolean }) => void;
 }
 
 export function createChatApp(options?: {

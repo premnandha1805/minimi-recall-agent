@@ -184,6 +184,7 @@ async function copyTextSafely(text) {
  */
 export function createChatApp(options = {}) {
   const doc = options.root ?? document;
+  const win = doc.defaultView ?? (typeof window !== 'undefined' ? window : null);
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const now = options.now ?? (() => new Date());
   const generateId = options.generateId ?? defaultIdGenerator;
@@ -266,6 +267,76 @@ export function createChatApp(options = {}) {
   const expandedTelemetryIds = new Set();
   /** @type {HTMLElement | null} */
   let drawerReturnFocusEl = null;
+  let isUserNearBottom = true;
+  const SCROLL_THRESHOLD_PX = 120;
+
+  /**
+   * Resolves the active scroll container for the conversation workspace.
+   * Prioritizes any scrollable message ancestor; falls back to document scrolling element.
+   * @returns {HTMLElement}
+   */
+  function getScrollContainer() {
+    let el = messageListEl?.parentElement;
+    while (el && el !== doc.body && el !== doc.documentElement) {
+      if (el.scrollHeight > el.clientHeight) {
+        const style = win?.getComputedStyle ? win.getComputedStyle(el) : null;
+        const overflowY = style?.overflowY || '';
+        if (overflowY === 'auto' || overflowY === 'scroll') {
+          return /** @type {HTMLElement} */ (el);
+        }
+      }
+      el = el.parentElement;
+    }
+    return /** @type {HTMLElement} */ (doc.scrollingElement || doc.documentElement || doc.body);
+  }
+
+  /**
+   * Determines whether the user is scrolled near the bottom of the conversation.
+   * @returns {boolean}
+   */
+  function isNearBottom() {
+    const container = getScrollContainer();
+    const isRoot = container === doc.documentElement || container === doc.body || container === doc.scrollingElement;
+    const scrollHeight = isRoot
+      ? Math.max(doc.documentElement?.scrollHeight || 0, doc.body?.scrollHeight || 0)
+      : container.scrollHeight;
+    const clientHeight = isRoot
+      ? (win?.innerHeight || doc.documentElement?.clientHeight || 0)
+      : container.clientHeight;
+    const scrollTop = isRoot
+      ? (win?.scrollY ?? doc.documentElement?.scrollTop ?? doc.body?.scrollTop ?? 0)
+      : container.scrollTop;
+
+    const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+    return distanceFromBottom <= SCROLL_THRESHOLD_PX;
+  }
+
+  /**
+   * Scrolls the conversation container to the bottom without page jitter or smooth-scroll delay.
+   * @param {{ force?: boolean }} [scrollOptions]
+   */
+  function scrollToBottom(scrollOptions = {}) {
+    if (!scrollOptions.force && !isUserNearBottom) {
+      return;
+    }
+    const container = getScrollContainer();
+    const isRoot = container === doc.documentElement || container === doc.body || container === doc.scrollingElement;
+    if (isRoot) {
+      const targetY = Math.max(doc.documentElement?.scrollHeight || 0, doc.body?.scrollHeight || 0);
+      if (typeof win?.scrollTo === 'function') {
+        win.scrollTo(0, targetY);
+      }
+      if (doc.documentElement) {
+        doc.documentElement.scrollTop = targetY;
+      }
+      if (doc.body) {
+        doc.body.scrollTop = targetY;
+      }
+    } else {
+      container.scrollTop = container.scrollHeight;
+    }
+    isUserNearBottom = true;
+  }
 
   /** @param {string} message */
   function announce(message) {
@@ -447,6 +518,9 @@ export function createChatApp(options = {}) {
     appShell?.classList.remove('drawer-open');
     drawerReturnFocusEl = null;
     syncSidebarAccessibility({ focusTarget: compactNow ? sidebarToggleBtn : chatInput });
+    if (isUserNearBottom) {
+      scrollToBottom();
+    }
   }
 
   function syncTextareaHeight() {
@@ -521,7 +595,9 @@ export function createChatApp(options = {}) {
         activeSession = item;
         showComposerError('');
         closeMobileDrawer({ restoreFocus: false, focusTarget: chatInput });
+        isUserNearBottom = true;
         renderWorkspace();
+        scrollToBottom({ force: true });
         chatInput?.focus();
         announce(`Switched to session ${item.title}`);
       });
@@ -878,10 +954,7 @@ export function createChatApp(options = {}) {
     renderSessionList();
     syncComposerControls();
 
-    const lastChild = messageListEl.lastElementChild;
-    if (lastChild && typeof lastChild.scrollIntoView === 'function') {
-      lastChild.scrollIntoView({ block: 'end' });
-    }
+    scrollToBottom();
   }
 
   /**
@@ -976,6 +1049,9 @@ export function createChatApp(options = {}) {
             const label = messageListEl?.querySelector(`[data-entry-id="${loadingEntryId}"] .loading-label`);
             if (label) label.textContent = entry.progress;
             announce(entry.progress);
+            if (isUserNearBottom) {
+              scrollToBottom();
+            }
           }
         },
       },
@@ -1191,7 +1267,9 @@ export function createChatApp(options = {}) {
         messageText: entry.retryPrompt,
       });
     }
+    isUserNearBottom = true;
     renderWorkspace();
+    scrollToBottom({ force: true });
     await executeChatSubmission(targetSession, entry.id, entry.retryPrompt, entry.retryHistory);
   }
 
@@ -1273,7 +1351,9 @@ export function createChatApp(options = {}) {
     persistActiveSessionInList();
     chatInput.value = '';
     syncTextareaHeight();
+    isUserNearBottom = true;
     renderWorkspace();
+    scrollToBottom({ force: true });
 
     await executeChatSubmission(activeSession, loadingId, trimmed, historySnapshot);
   }
@@ -1287,7 +1367,9 @@ export function createChatApp(options = {}) {
       syncTextareaHeight();
     }
     closeMobileDrawer({ restoreFocus: false, focusTarget: chatInput });
+    isUserNearBottom = true;
     renderWorkspace();
+    scrollToBottom({ force: true });
     chatInput?.focus();
     announce('Started a new conversation.');
   }
@@ -1485,6 +1567,25 @@ export function createChatApp(options = {}) {
     }
   }
 
+  /** @param {Event} event */
+  const handleScroll = (event) => {
+    const target = event.target;
+    const container = getScrollContainer();
+    const isRoot = container === doc.documentElement || container === doc.body || container === doc.scrollingElement;
+    if (isRoot) {
+      if (target === doc || target === win || target === doc.documentElement || target === doc.body) {
+        isUserNearBottom = isNearBottom();
+      }
+    } else if (target === container) {
+      isUserNearBottom = isNearBottom();
+    }
+  };
+
+  doc.addEventListener('scroll', handleScroll, { passive: true, capture: true, signal: listenerSignal });
+  if (win) {
+    win.addEventListener('scroll', handleScroll, { passive: true, signal: listenerSignal });
+  }
+
   // Initial state render + accessibility sync + health probe
   appShell.dataset.initialized = 'true';
   syncSidebarAccessibility();
@@ -1498,6 +1599,8 @@ export function createChatApp(options = {}) {
     getActiveSession: () => activeSession,
     getSessions: () => sessions,
     waitForInitialHealth: () => initialHealthPromise,
+    isScrolledToBottom: () => isUserNearBottom,
+    scrollToBottom,
     destroy: () => {
       abortActiveRequest('navigation');
       listenerController.abort();
