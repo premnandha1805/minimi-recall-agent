@@ -16,6 +16,13 @@ verification remain outstanding. Citation-ID checks do not establish factual
 verification. Live model compatibility, quota and measured latency are unverified.
 The architecture and remaining acceptance requirements below remain the target.
 
+**Gate 2 storage milestone:** An isolated, versioned JSON conversation store now
+implements durable turn/attempt records and evidence snapshots with bounded local
+storage and explicit receipt states ([storage contract](docs/memory.md)). It is
+not yet connected to chat or browser restoration; persistent chat, temporal
+resolution and context retrieval remain outstanding. This does not change the
+interim SSE contract or establish quotation/factual verification.
+
 - **One external tool:** `web_search`, implemented through a replaceable Tavily adapter. The model decides when to search; **code** enforces **2 rounds / 8 provider queries** (up to **5** first round, **3** second), query deduplication and bounded concurrency. History/date functions are internal, not extra tools.
 - **Memory and time:** Persist original messages, IDs and UTC timestamps in per-conversation JSON. Merge request-seeded history with disk history by ID (fallback: hash of role/timestamp/content); server copy wins conflicts. Inject all history while it fits, otherwise anchor relevant dates/keywords. Use `chrono-node` and an IANA timezone for relative dates. Atomic rename plus per-conversation write queues prevent partial or lost writes **within one process**.
 - **Speed and failure:** One server serves the plain HTML/CSS/JS UI and streams SSE progress and answer text. Overall deadline: **25 s**; stop launching searches around **15 s** to reserve synthesis time. Timeouts, abort-on-disconnect, and partial-evidence responses prevent a slow or failed search from becoming an invented answer.
