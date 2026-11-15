@@ -2,8 +2,8 @@
 
 This interim integration uses **SSE progress plus one validated final/partial
 answer, not token streaming**. The existing Azure adapter sends `stream: false`.
-True token streaming remains a future requirement. Persistent memory, temporal
-recall/date anchoring and quotation verification remain outstanding. Live Azure
+True token streaming remains a future requirement. Server-backed browser restoration and receipt acknowledgment are implemented;
+temporal recall/context integration and quotation verification remain outstanding. Live Azure
 deployment compatibility, account quota and measured live latency are unverified.
 
 ## Request and credential preflight
@@ -159,3 +159,10 @@ Optional turn keys, identity headers, explicit receipts and provider-free recove
 are documented in [memory.md](memory.md#milestone-3-http-integration). The five
 SSE payload shapes remain unchanged. Error notices say no answer was accepted,
 which does not deny that an unaccepted generated snapshot may exist on disk.
+
+
+The browser now sends the optional turn keys, remembers only the canonical
+conversation ID, restores server messages and sources, and explicitly acknowledges
+complete SSE results after clean EOF. Pending recovery uses memory HTTP endpoints,
+not chat. Receipt failures and research-partial answers are excluded from trusted
+assistant history. See [browser memory behavior](memory.md#milestone-4-browser-integration).

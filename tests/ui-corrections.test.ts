@@ -30,7 +30,7 @@ afterEach(() => {
 });
 async function mount(content: string, failSecond = false) {
   let call = 0;
-  const app = createChatApp({ root: document, fetchImpl: async (url, init) => {
+  const app = createChatApp({ persistence: false, root: document, fetchImpl: async (url, init) => {
     if (url === '/health') return new Response('{"status":"ok"}');
     const body = JSON.parse(String(init?.body));
     const attempt = ++call;

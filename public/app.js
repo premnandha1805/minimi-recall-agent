@@ -6,7 +6,7 @@ import {
   buildBoundedChatBody,
   checkHealth,
   getLocalTimeZone,
-  sendChatRequest,
+  sendChatRequest, memoryRequest, validConversation, validChatEvent, memoryId, MemoryApiError,
 } from './api.js';
 
 export { MAX_MESSAGE_CHARS };
@@ -49,6 +49,8 @@ export { MAX_MESSAGE_CHARS };
  * @property {string} text
  * @property {string} timestamp
  * @property {import('../src/contracts.js').ChatResult} [result]
+ * @property {string} [receiptStatus]
+ * @property {{conversationId: string, turnId: string, attemptId: string}} [receipt]
  */
 
 /**
@@ -180,6 +182,7 @@ async function copyTextSafely(text) {
  *   generateId?: (prefix: string) => string,
  *   maxHistoryItems?: number,
  *   maxBodyBytes?: number,
+ *   persistence?: boolean,
  * }} [options]
  */
 export function createChatApp(options = {}) {
@@ -191,6 +194,18 @@ export function createChatApp(options = {}) {
   const maxHistoryItems = options.maxHistoryItems ?? MAX_HISTORY_ITEMS;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const listenerController = new AbortController();
+  const persistence = options.persistence !== false;
+  let memoryBusy = false; let navigation = 0;
+  /** @type {AbortController | undefined} */ let loadController;
+  /** @type {Map<string, {key: string, attemptKey: string}>} */ const submissions = new Map();
+  /** @type {Set<string>} */ const remoteSessions = new Set();
+  const memoryStatus = el(doc, 'div', 'memory-status'); memoryStatus.setAttribute('role', 'status');
+  const memoryKey = 'recall.activeConversation.v1';
+  /** @param {string | null} id */
+  function remember(id) { try { if (id) win?.localStorage.setItem(memoryKey, id); else win?.localStorage.removeItem(memoryKey); }
+    catch { memoryStatus.textContent = 'This browser cannot save the active conversation ID. Server history is still retained.'; } }
+  /** @param {string} path @param {{method?: string, body?: object, signal?: AbortSignal}} [extra] */
+  const stored = (path, extra = {}) => memoryRequest(path, { fetchImpl, signal: listenerController.signal, ...extra });
 
   const appShell = /** @type {HTMLElement | null} */ (doc.getElementById('app-shell'));
   const sidebarEl = /** @type {HTMLElement | null} */ (doc.getElementById('sidebar'));
@@ -562,7 +577,7 @@ export function createChatApp(options = {}) {
     const raw = chatInput.value;
     const trimmed = raw.trim();
     const isOverLimit = raw.length > MAX_MESSAGE_CHARS;
-    const isLocked = activeRequest !== null;
+    const isLocked = activeRequest !== null || memoryBusy;
 
     if (charCounter) {
       charCounter.textContent = `${raw.length.toLocaleString('en-US')} / ${MAX_MESSAGE_CHARS.toLocaleString('en-US')}`;
@@ -589,6 +604,10 @@ export function createChatApp(options = {}) {
       return;
     }
     sessionListEl.replaceChildren();
+    if (persistence) {
+      const refresh = el(doc, 'button', 'btn-primary-sm', 'Refresh conversations');
+      refresh.addEventListener('click', () => { void refreshConversations(); }); sessionListEl.appendChild(refresh);
+    }
 
     if (sessions.length === 0) {
       sessionListEl.appendChild(
@@ -596,7 +615,7 @@ export function createChatApp(options = {}) {
           doc,
           'p',
           'session-empty-note',
-          'Conversations stay in this browser tab until you refresh or close it.',
+          persistence ? 'No stored conversations loaded. New messages are saved on this server.' : 'Conversations stay in this browser tab until you refresh or close it.',
         ),
       );
       return;
@@ -609,6 +628,7 @@ export function createChatApp(options = {}) {
         button.setAttribute('aria-current', 'page');
       }
       button.addEventListener('click', () => {
+        if (persistence && remoteSessions.has(item.id)) { void openConversation(item.id); return; }
         if (item.id === activeSession.id) {
           closeMobileDrawer({ restoreFocus: false, focusTarget: chatInput });
           chatInput?.focus({ preventScroll: true });
@@ -969,6 +989,16 @@ export function createChatApp(options = {}) {
     const sources = new Map((entry.result?.sources ?? []).map((s) => [s.id, s]));
     renderFormattedContent(content, entry.text, sources);
     answerCard.appendChild(content);
+    if (entry.receiptStatus) {
+      answerCard.appendChild(el(doc, 'p', 'research-limitation', entry.receiptStatus));
+      if (entry.receipt && entry.result?.coverage === 'complete') {
+        const recover = el(doc, 'button', 'btn-primary-sm', 'Recover / retry receipt');
+        recover.dataset.action = 'recover-receipt';
+        const owner = activeSession;
+        recover.addEventListener('click', () => { if (activeSession === owner && owner.entries.includes(entry)) void receiveStoredAnswer(owner, entry, true); });
+        answerCard.appendChild(recover);
+      }
+    }
     if (entry.result?.coverage === 'partial') {
       const labels = {
         search_budget_exhausted: 'Search budget reached', search_cutoff: 'Search time window ended',
@@ -1040,7 +1070,7 @@ export function createChatApp(options = {}) {
       if (activeSession.omittedHistoryCount > 0) {
         const count = activeSession.omittedHistoryCount;
         omittedHistoryNoteEl.hidden = false;
-        omittedHistoryNoteEl.textContent = `${count} earlier session ${count === 1 ? 'message was' : 'messages were'} omitted from the API request payload to stay within backend history (100) and size (256 KB) limits; full messages remain visible in this tab only.`;
+        omittedHistoryNoteEl.textContent = `${count} earlier session ${count === 1 ? 'message was' : 'messages were'} omitted from the API request payload to stay within backend history (100) and size (256 KB) limits; ${persistence ? 'saved turns can be restored from the server' : 'full messages remain visible in this tab only'}.`;
       } else {
         omittedHistoryNoteEl.hidden = true;
         omittedHistoryNoteEl.textContent = '';
@@ -1090,6 +1120,8 @@ export function createChatApp(options = {}) {
     const loadingEntry = targetSession.entries[loadingIndex];
     const userEntry = targetSession.entries[loadingIndex - 1];
     if (loadingEntry?.kind !== 'loading' || userEntry?.kind !== 'user') return;
+    const submission = submissions.get(userEntry.id) ?? { key: userEntry.id, attemptKey: generateId('attempt') };
+    submissions.set(userEntry.id, submission);
     const requestToken = ++nextRequestToken;
     /** @type {{ controller: AbortController, sessionId: string, requestToken: number, abortReason: 'user' | 'navigation' | null }} */
     const requestState = {
@@ -1099,6 +1131,25 @@ export function createChatApp(options = {}) {
       abortReason: null,
     };
     activeRequest = requestState;
+    if (persistence && !memoryId(targetSession.id)) {
+      try {
+        const created = await stored('/api/conversations', { method: 'POST', body: {}, signal: AbortSignal.any([requestState.controller.signal, listenerController.signal]) });
+        if (!validConversation(created)) throw new Error('Invalid conversation');
+        if (requestState.controller.signal.aborted) throw new Error('Cancelled');
+        if (targetSession.entries.find((e) => e.id === loadingEntryId) !== loadingEntry) return;
+        targetSession.id = created.id; requestState.sessionId = created.id; remoteSessions.add(created.id); remember(created.id);
+      } catch {
+        if (targetSession.entries.find((e) => e.id === loadingEntryId) === loadingEntry) {
+          targetSession.entries.splice(loadingIndex, 1, { id: loadingEntryId, kind: 'notice', tone: 'error', title: requestState.controller.signal.aborted ? 'Request cancelled' : 'Conversation could not be created',
+            subtitle: 'No model request started', pill: 'Storage unavailable', body: requestState.controller.signal.aborted ? 'Request cancelled before a model call started.' : 'Server storage could not be reached. Retry when the server is available.',
+            retryPrompt: promptText, retryHistory: historySnapshot, telemetry: {} });
+          if (activeSession === targetSession) renderWorkspace();
+        }
+        return;
+      } finally { if (requestState.controller.signal.aborted || targetSession.id === requestState.sessionId && !memoryId(targetSession.id)) {
+        if (activeRequest === requestState) activeRequest = null; syncComposerControls();
+      } }
+    }
     const timezone = getLocalTimeZone();
 
     const boundedPreview = buildBoundedChatBody(
@@ -1106,7 +1157,8 @@ export function createChatApp(options = {}) {
         conversationId: targetSession.id,
         message: promptText,
         timezone,
-        history: historySnapshot,
+        history: persistence ? historySnapshot.filter((m) => m.role !== 'user' || !!m.id && memoryId(m.id)) : historySnapshot,
+        ...(persistence ? { turn: submission } : {}),
       },
       { maxHistoryItems, maxBodyBytes },
     );
@@ -1157,7 +1209,8 @@ export function createChatApp(options = {}) {
         conversationId: targetSession.id,
         message: promptText,
         timezone,
-        history: historySnapshot,
+        history: persistence ? historySnapshot.filter((m) => m.role !== 'user' || !!m.id && memoryId(m.id)) : historySnapshot,
+        ...(persistence ? { turn: submission } : {}),
       },
       {
         signal: requestState.controller.signal,
@@ -1181,6 +1234,23 @@ export function createChatApp(options = {}) {
         },
       },
     );
+
+    let synchronized = !persistence;
+    if (persistence && memoryId(targetSession.id) && !listenerController.signal.aborted && !requestState.controller.signal.aborted) {
+      try {
+        const value = await stored(`/api/conversations/${targetSession.id}`, { signal: AbortSignal.any([requestState.controller.signal, listenerController.signal]) });
+        if (!validConversation(value) || value.id !== targetSession.id) throw new Error('Invalid conversation');
+        const turn = value.turns.find((t) => t.key === submission.key);
+        if (turn && targetSession.entries.find((e) => e.id === loadingEntryId) === loadingEntry) {
+          const oldId = userEntry.id; const item = targetSession.history.find((m) => m.id === oldId);
+          const keys = submissions.get(oldId); if (keys) { submissions.delete(oldId); submissions.set(turn.user.id, keys); }
+          userEntry.id = turn.user.id; userEntry.timestamp = turn.user.timestamp; userEntry.text = turn.user.content;
+          if (item) Object.assign(item, turn.user); synchronized = true;
+        }
+      } catch { if (!requestState.controller.signal.aborted) memoryStatus.textContent = 'Server turn state could not be synchronized. Refresh conversations before relying on this history.'; }
+    }
+
+    if (requestState.controller.signal.aborted) result.kind = 'aborted';
 
     // A completion owns only the loading slot that started it. A newer attempt
     // may already have replaced that slot after cancellation.
@@ -1209,9 +1279,19 @@ export function createChatApp(options = {}) {
 
     if (result.kind === 'ok' && result.result && !requestState.controller.signal.aborted) {
       const answer = result.result;
-      replaceEntry({ id: loadingEntryId, kind: 'assistant', text: answer.message.content,
-        timestamp: answer.message.timestamp, result: answer });
-      if (answer.coverage === 'complete' && !targetSession.history.some((item) => item.id === answer.message.id)) {
+      /** @type {ThreadAssistantEntry} */
+      const assistant = { id: loadingEntryId, kind: 'assistant', text: answer.message.content,
+        timestamp: answer.message.timestamp, result: answer,
+        ...(persistence ? { receipt: result.receipt, receiptStatus: answer.coverage === 'partial' ? 'Partial answer retained; it is excluded from assistant history.' : result.receipt ? 'Answer received; server receipt is pending.' : 'Receipt identifiers are missing; this answer is excluded from assistant history.' } : {}) };
+      replaceEntry(assistant);
+      if (persistence) {
+        if (result.receipt) targetSession.id = result.receipt.conversationId;
+        remoteSessions.add(targetSession.id);
+        remember(result.receipt?.conversationId ?? targetSession.id);
+        if (answer.coverage === 'complete' && result.receipt && synchronized) await receiveStoredAnswer(targetSession, assistant, false);
+        else if (!synchronized) assistant.receiptStatus = 'Server turn identity could not be synchronized. Refresh conversations before continuing this history.';
+      }
+      if (!persistence && answer.coverage === 'complete' && !targetSession.history.some((item) => item.id === answer.message.id)) {
         // Completion time is not turn order: an older retry belongs immediately
         // after its original user message, before any later user/assistant turns.
         const userIndex = targetSession.history.findIndex((item) => item.id === userEntry.id && item.role === 'user');
@@ -1219,6 +1299,7 @@ export function createChatApp(options = {}) {
       }
       if (shouldAnnounceAndFocus) announce(answer.coverage === 'complete' ? 'Answer received.' : 'Answer received with partial research.');
     } else if (result.kind === 'stream_error' || result.kind === 'protocol_error') {
+      if (result.kind === 'stream_error') submissions.set(userEntry.id, { key: submission.key, attemptKey: generateId('attempt') });
       replaceEntry({ id: loadingEntryId, kind: 'notice', tone: 'error', title: 'Response could not be completed',
         subtitle: 'No assistant reply recorded', pill: 'Response error',
         body: result.message || 'The response was incomplete or invalid.', retryPrompt: promptText, retryHistory: historySnapshot,
@@ -1252,10 +1333,11 @@ export function createChatApp(options = {}) {
           },
         },
       });
-      if (shouldAnnounceAndFocus) {
+      if (shouldAnnounceAndFocus && activeRequest === null && activeSession === targetSession) {
         announce('Server responded with HTTP 501: agent not implemented yet.');
       }
     } else if (result.kind === 'aborted') {
+      submissions.set(userEntry.id, { key: submission.key, attemptKey: generateId('attempt') });
       replaceEntry({
         id: loadingEntryId,
         kind: 'notice',
@@ -1271,7 +1353,7 @@ export function createChatApp(options = {}) {
           conversationId: targetSession.id,
         },
       });
-      if (shouldAnnounceAndFocus) {
+      if (shouldAnnounceAndFocus && activeRequest === null && activeSession === targetSession) {
         announce('Chat request cancelled.');
       }
     } else if (result.kind === 'network_error') {
@@ -1292,7 +1374,7 @@ export function createChatApp(options = {}) {
           conversationId: targetSession.id,
         },
       });
-      if (shouldAnnounceAndFocus) {
+      if (shouldAnnounceAndFocus && activeRequest === null && activeSession === targetSession) {
         announce('Network error: could not reach server.');
         void refreshHealth();
       }
@@ -1333,7 +1415,7 @@ export function createChatApp(options = {}) {
           },
         },
       });
-      if (shouldAnnounceAndFocus) {
+      if (shouldAnnounceAndFocus && activeRequest === null && activeSession === targetSession) {
         announce(`Server error HTTP ${status}.`);
       }
     } else {
@@ -1366,19 +1448,110 @@ export function createChatApp(options = {}) {
           },
         },
       });
-      if (shouldAnnounceAndFocus) {
+      if (shouldAnnounceAndFocus && activeRequest === null && activeSession === targetSession) {
         announce(`Server returned HTTP ${status} without a supported assistant response.`);
       }
     }
 
     if (isCurrentActiveSession) {
       renderWorkspace();
-      if (shouldAnnounceAndFocus) {
+      if (shouldAnnounceAndFocus && activeRequest === null && activeSession === targetSession) {
         chatInput?.focus({ preventScroll: true });
       }
     } else {
       syncComposerControls();
     }
+  }
+
+  /** @param {SessionRecord} session @param {ThreadAssistantEntry} entry @param {boolean} recover */
+  async function receiveStoredAnswer(session, entry, recover) {
+    const refs = entry.receipt; if (!refs || !entry.result || entry.result.coverage !== 'complete') return;
+    const version = navigation;
+    const base = `/api/conversations/${refs.conversationId}/turns/${refs.turnId}/attempts/${refs.attemptId}`;
+    try {
+      let answer = entry.result;
+      if (recover) {
+        const value = await stored(`${base}/result`);
+        if (!['awaiting_receipt','accepted'].includes(value.status) || !validChatEvent('result', value.result) ||
+            value.result.coverage !== 'complete' || value.result.message.id !== answer.message.id) throw new Error('Invalid recovery');
+        answer = value.result;
+      }
+      if (listenerController.signal.aborted || !session.entries.includes(entry) || version !== navigation) return;
+      const acknowledged = await stored(`${base}/receipt`, { method: 'POST', body: { messageId: answer.message.id } });
+      if (acknowledged.status !== 'accepted' || !validChatEvent('result', acknowledged.answer?.result) ||
+          acknowledged.answer.result.message.id !== answer.message.id) throw new Error('Invalid receipt');
+      if (listenerController.signal.aborted || !session.entries.includes(entry) || version !== navigation) return;
+      entry.receiptStatus = undefined;
+      if (!session.history.some((m) => m.id === answer.message.id)) {
+        const index = session.entries.indexOf(entry); const user = session.entries[index - 1];
+        const at = session.history.findIndex((m) => m.id === user?.id);
+        if (at >= 0) session.history.splice(at + 1, 0, { ...answer.message });
+      }
+    } catch {
+      if (!listenerController.signal.aborted && session.entries.includes(entry)) entry.receiptStatus = 'Answer is visible, but receipt was not confirmed. Retry receipt before using it as conversation history.';
+    }
+    if (activeSession === session && !listenerController.signal.aborted) renderWorkspace();
+  }
+  /** @param {string} id */
+  async function openConversation(id) {
+    if (!memoryId(id)) { memoryStatus.textContent = 'Invalid stored conversation identity.'; return; }
+    const token = ++navigation; abortActiveRequest('navigation'); loadController?.abort();
+    loadController = new AbortController(); memoryBusy = true; syncComposerControls();
+    try {
+      const value = await stored(`/api/conversations/${id}`, { signal: AbortSignal.any([loadController.signal, listenerController.signal]) });
+      if (!validConversation(value) || value.id !== id) throw new Error('Invalid conversation');
+      if (token !== navigation || listenerController.signal.aborted) return;
+      /** @type {SessionRecord} */ const session = { id: value.id, title: 'Stored conversation', entries: [], history: [], omittedHistoryCount: 0 };
+      for (const seed of value.seededMessages) {
+        session.history.push({ id: seed.id, role: seed.role, content: seed.content, timestamp: seed.timestamp });
+        session.entries.push(seed.role === 'user' ? { id: seed.id, kind: 'user', text: seed.content, timestamp: seed.timestamp } :
+          { id: seed.id, kind: 'assistant', text: seed.content, timestamp: seed.timestamp, receiptStatus: 'Imported historical text; original supporting sources are unavailable.' });
+      }
+      for (const turn of value.turns) {
+        session.entries.push({ id: turn.user.id, kind: 'user', text: turn.user.content, timestamp: turn.user.timestamp, timezone: turn.timezone });
+        session.history.push({ ...turn.user });
+        const attempt = turn.attempts.at(-1);
+        submissions.set(turn.user.id, { key: turn.key, attemptKey: attempt && ['running','generated','awaiting_receipt','accepted','partial'].includes(attempt.status) ? attempt.key : generateId('attempt') });
+        if (attempt?.answer && ['accepted','partial','awaiting_receipt'].includes(attempt.status)) {
+          const answer = attempt.answer.result;
+          session.entries.push({ id: attempt.id, kind: 'assistant', text: answer.message.content, timestamp: answer.message.timestamp, result: answer,
+            receipt: { conversationId: id, turnId: turn.id, attemptId: attempt.id },
+            ...(attempt.status === 'awaiting_receipt' ? { receiptStatus: answer.coverage === 'complete' ? 'Stored answer awaits recovery and receipt confirmation.' : 'Partial answer; excluded from assistant history.' } : {}) });
+          if (attempt.status === 'accepted') session.history.push({ ...answer.message });
+        } else session.entries.push({ id: attempt?.id ?? turn.id, kind: 'notice', tone: 'warning', title: 'No completed answer',
+          subtitle: attempt?.status ?? 'Unsubmitted turn', pill: 'Stored turn', body: 'No accepted answer is stored for this turn. Retry or refresh its server state.',
+          retryPrompt: turn.user.content, retryHistory: [], telemetry: {} });
+      }
+      session.title = buildSessionTitle(value.turns[0]?.user.content ?? value.seededMessages[0]?.content ?? 'Stored conversation');
+      const index = sessions.findIndex((s) => s.id === id); if (index >= 0) sessions[index] = session; else sessions.push(session);
+      activeSession = session; remoteSessions.add(id); remember(id); memoryStatus.textContent = ''; renderWorkspace();
+    } catch (error) {
+      if (token !== navigation || listenerController.signal.aborted) return;
+      memoryStatus.textContent = error instanceof MemoryApiError && error.status === 404 ? 'This conversation was deleted or is unavailable. Start a new conversation.' : 'Conversation could not be restored. Your current view has been preserved. Refresh conversations to retry.';
+      if (error instanceof MemoryApiError && error.status === 404) { remember(null); remoteSessions.delete(id); const index = sessions.findIndex((s) => s.id === id); if (index >= 0 && sessions[index] !== activeSession) sessions.splice(index, 1); }
+    } finally { if (token === navigation) { memoryBusy = false; syncComposerControls(); } }
+  }
+  async function refreshConversations() {
+    const token = navigation;
+    try {
+      for (const offset of [0, 50]) {
+        const page = await stored(`/api/conversations?offset=${offset}&limit=50`);
+        if (!page || !Array.isArray(page.items) || page.items.length > 50 || !Number.isInteger(page.total) || page.total < 0 || page.total > 100 ||
+            !page.items.every((/** @type {any} */ v) => memoryId(v.id))) throw new Error('Invalid list');
+        if (token !== navigation || listenerController.signal.aborted) return;
+        for (const item of page.items) if (!sessions.some((s) => s.id === item.id)) {
+          sessions.push({ id: item.id, title: 'Stored conversation ? open to view', entries: [], history: [], omittedHistoryCount: 0 }); remoteSessions.add(item.id);
+        }
+        if (offset + page.items.length >= page.total) break;
+      }
+      memoryStatus.textContent = ''; renderSessionList();
+    } catch { if (!listenerController.signal.aborted && token === navigation) memoryStatus.textContent = 'Stored conversations could not be listed. Refresh conversations to retry; the current view is preserved.'; }
+  }
+  async function restoreConversations() {
+    memoryBusy = true; syncComposerControls(); await refreshConversations();
+    let saved; try { saved = win?.localStorage.getItem(memoryKey); } catch { /* ID storage is optional. */ }
+    if (saved && memoryId(saved) && navigation === 0 && !listenerController.signal.aborted) await openConversation(saved);
+    memoryBusy = false; syncComposerControls();
   }
 
   /**
@@ -1423,7 +1596,7 @@ export function createChatApp(options = {}) {
   }
 
   async function handleFormSubmit() {
-    if (!chatInput || activeRequest !== null) {
+    if (!chatInput || activeRequest !== null || memoryBusy) {
       return;
     }
     const trimmed = chatInput.value.trim();
@@ -1499,6 +1672,7 @@ export function createChatApp(options = {}) {
 
   function startNewConversation() {
     abortActiveRequest('navigation');
+    navigation++; loadController?.abort(); memoryBusy = false; remember(null);
     activeSession = makeBlankSession();
     showComposerError('');
     if (chatInput) {
@@ -1730,10 +1904,14 @@ export function createChatApp(options = {}) {
   syncSidebarAccessibility();
   syncTextareaHeight();
   renderWorkspace();
-  const initialHealthPromise = refreshHealth();
+  composerForm?.before(memoryStatus);
+  const initialRestoration = persistence ? restoreConversations() : Promise.resolve();
+  const initialHealthPromise = Promise.all([refreshHealth(), initialRestoration]).then(([health]) => health);
+  win?.addEventListener('storage', (event) => { if (event.key === memoryKey && persistence) memoryStatus.textContent = 'Another tab changed the active conversation. Refresh conversations to view server state.'; }, { signal: listenerSignal });
 
   return {
     refreshHealth,
+    refreshConversations, openConversation, waitForRestoration: () => initialRestoration,
     startNewConversation,
     getActiveSession: () => activeSession,
     getSessions: () => sessions,
@@ -1742,7 +1920,7 @@ export function createChatApp(options = {}) {
     scrollToBottom,
     destroy: () => {
       abortActiveRequest('navigation');
-      listenerController.abort();
+      navigation++; loadController?.abort(); memoryStatus.remove(); listenerController.abort();
     },
   };
 }

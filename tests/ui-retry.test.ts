@@ -22,7 +22,7 @@ afterEach(() => { for (const app of apps.splice(0)) app.destroy(); document.body
 async function mount(respond: (body: Body, attempt: number) => Response | Promise<Response>,
   limits: { maxHistoryItems?: number; maxBodyBytes?: number } = {}) {
   const bodies: Body[] = [];
-  const app = createChatApp({ root: document, ...limits, fetchImpl: async (url, init) => {
+  const app = createChatApp({ persistence: false, root: document, ...limits, fetchImpl: async (url, init) => {
     if (url === '/health') return new Response('{"status":"ok"}');
     const body = JSON.parse(String(init?.body)) as Body;
     bodies.push(body); return respond(body, bodies.length);

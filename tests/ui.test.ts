@@ -77,7 +77,7 @@ describe('Recall Agent Chat UI (public/index.html + app.js + api.js)', () => {
   ): Promise<CreateChatAppResult> {
     const appModule = await import('../public/app.js');
     expect(appModule.MAX_MESSAGE_CHARS).toBe(CONTRACT_MAX_MESSAGE_CHARS);
-    const instance = appModule.createChatApp({
+    const instance = appModule.createChatApp({ persistence: false,
       root: document,
       fetchImpl: fetchMock,
       maxHistoryItems: overrides?.maxHistoryItems,

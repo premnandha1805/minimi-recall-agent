@@ -1,7 +1,7 @@
 # Durable conversation storage — Gate 2, Milestone 1
 
-`src/memory.ts` now connects to Fastify through `src/memory-http.ts`. The browser
-is not yet wired to restore sessions or send receipts. Automatic context retrieval
+`src/memory.ts` now connects to Fastify through `src/memory-http.ts`. The browser now restores server conversations and sends explicit complete-answer
+receipts. Automatic context retrieval
 and historical/current comparison remain outstanding.
 
 ## Ownership and schema
@@ -124,8 +124,7 @@ invalid state transitions and duplicate stored identities fail explicitly.
 fixtures. It exercises replacement, failure preservation, recovery, limits,
 idempotency, privacy-safe errors, turn order and concurrency without providers.
 
-Later milestones must add browser restoration/receipts and bounded context
-retrieval. The standalone temporal resolver still needs chat integration.
+Later milestones must add bounded context retrieval. The standalone temporal resolver still needs chat integration.
 Quotation/change verification and true token streaming remain separate outstanding
 requirements. This isolated storage service does not complete Gate 2 or Gate 1's
 live acceptance requirements.
@@ -180,3 +179,42 @@ Storage errors map to sanitized JSON 400/404/409/503/507 before SSE; after hijac
 existing error/done ownership remains unchanged. HTTP memory reads/recovery work
 without model credentials. `BuildServerOptions.memoryDirectory` selects an owned
 private directory for tests or local deployment; default remains `.recall-data/`.
+
+
+## Milestone 4 browser integration
+
+The browser lists bounded stored conversations and loads the active server-owned
+UUID after refresh. Only `recall.activeConversation.v1` (one conversation ID) is
+kept in localStorage; message text, evidence and receipt state are never cached
+there. Earlier conversations are reopened by fetching their current server records.
+Client-seeded records remain visibly labeled when their original sources are absent.
+Only accepted server answers enter restored assistant history; partial, cancelled,
+interrupted and pending attempts do not. Original logical turn order is retained.
+
+A new conversation is created on the server before its first chat request. Each
+user turn has stable turn/attempt keys; failed completed executions get a fresh
+attempt key for retry, while uncertain network/protocol delivery reuses the key
+for idempotent replay. Server user-message identities and timestamps replace
+local provisional identities before subsequent history submission. Unsynchronized
+provisional user records are not reimported as new server history.
+
+Newly delivered complete answers are acknowledged only after schema/order checks,
+matching terminal delivery and clean SSE EOF. Restored awaiting-receipt answers
+require an explicit Recover / retry receipt action: fetch the saved result,
+validate it and acknowledge its exact message identity. Recovery never submits
+chat. Partial answers are never acknowledged by the browser. Lost acknowledgments
+can be retried; failed receipts stay visibly pending and excluded from history.
+
+Memory HTTP reads are bounded to 5 MiB, have a ten-second transport watchdog,
+validate browser-consumed identities/results and clean up readers/listeners/timers.
+Restoration is cancelled/ignored after newer navigation or destruction. Other-tab
+selection changes show a notice rather than silently replacing the current view;
+server overlap checks remain authoritative. Network, malformed data and deleted
+conversation errors preserve the current view and show an explicit status.
+A Refresh conversations control retries listing without paid calls. This remains
+one local user's server, with no public-deployment authentication.
+
+`tests/ui-memory.test.ts` uses frozen offline HTTP/SSE responses. Existing isolated
+UI suites explicitly disable persistence to retain their layout/interaction test
+boundaries. Real browser geometry, storage restrictions and multiple real browser
+windows still require manual evaluation; DOM tests do not prove those behaviors.

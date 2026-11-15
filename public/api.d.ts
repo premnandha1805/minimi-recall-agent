@@ -15,6 +15,7 @@ export interface ChatRequestPayload {
   message: string;
   timezone?: string;
   history?: ChatHistoryItem[];
+  turn?: { key: string; attemptKey: string };
 }
 
 export interface BoundedChatBodyResult {
@@ -52,6 +53,7 @@ export interface ChatApiResult {
   data?: unknown;
   result?: import('../src/contracts.js').ChatResult;
   omittedHistoryCount?: number;
+  receipt?: { conversationId: string; turnId: string; attemptId: string };
 }
 
 export function getUtf8ByteLength(value: string): number;
@@ -89,3 +91,15 @@ export function readChatStream(response: Response, options?: {
 }): Promise<{ meta: import('../src/contracts.js').ChatEventPayloads['meta'];
   result?: import('../src/contracts.js').ChatResult;
   error?: import('../src/contracts.js').ChatEventPayloads['error'] }>;
+
+export function memoryId(value: string | null): boolean;
+export class MemoryApiError extends Error { status: number; }
+export function memoryRequest(path: string, options?: { fetchImpl?: typeof fetch; signal?: AbortSignal; method?: string; body?: object }): Promise<any>;
+export function validConversation(value: unknown): value is StoredConversation;
+
+export interface StoredConversation {
+  schemaVersion: 'recall.memory.v1'; id: string;
+  seededMessages: Array<ChatHistoryItem & {id: string}>;
+  turns: Array<{id: string; key: string; ordinal: number; user: ChatHistoryItem & {id: string}; timezone?: string;
+    attempts: Array<{id: string; key: string; status: string; answer?: {result: import('../src/contracts.js').ChatResult}}>}>
+}

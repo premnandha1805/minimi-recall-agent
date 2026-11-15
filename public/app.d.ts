@@ -3,6 +3,9 @@ import type { ChatHistoryItem, HealthStatusResult } from './api.js';
 export const MAX_MESSAGE_CHARS: number;
 
 export interface ChatAppInstance {
+  refreshConversations: () => Promise<void>;
+  openConversation: (id: string) => Promise<void>;
+  waitForRestoration: () => Promise<void>;
   refreshHealth: () => Promise<HealthStatusResult>;
   startNewConversation: () => void;
   getActiveSession: () => {
@@ -26,4 +29,5 @@ export function createChatApp(options?: {
   generateId?: (prefix: string) => string;
   maxHistoryItems?: number;
   maxBodyBytes?: number;
+  persistence?: boolean;
 }): ChatAppInstance;

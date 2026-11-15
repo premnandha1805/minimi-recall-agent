@@ -21,6 +21,7 @@ const utf8Encoder = new TextEncoder();
  * @property {string} message
  * @property {string} [timezone]
  * @property {ChatHistoryItem[]} [history]
+ * @property {{key: string, attemptKey: string}} [turn]
  */
 
 /**
@@ -62,6 +63,7 @@ const utf8Encoder = new TextEncoder();
  * @property {unknown} [data]
  * @property {import('../src/contracts.js').ChatResult} [result]
  * @property {number} [omittedHistoryCount]
+ * @property {{conversationId: string, turnId: string, attemptId: string}} [receipt]
  */
 
 /**
@@ -148,6 +150,7 @@ export function buildBoundedChatBody(payload, limits = {}) {
   /** @type {ChatRequestPayload} */
   const baseBody = {
     message: payload.message,
+    ...(payload.turn ? { turn: payload.turn } : {}),
     ...(payload.conversationId ? { conversationId: payload.conversationId } : {}),
     ...(payload.timezone ? { timezone: payload.timezone } : {}),
   };
@@ -353,7 +356,8 @@ async function sendChatRequestInner(payload, options = {}) {
       return { ...(streamed.result ? { kind: /** @type {const} */ ('ok'), result: streamed.result } : {
         kind: /** @type {const} */ ('stream_error'), code: streamed.error?.code, message: streamed.error?.message,
       }), status: 200, requestId: streamed.meta.requestId, conversationId: streamed.meta.conversationId,
-      contentType, omittedHistoryCount: omittedCount };
+      contentType, omittedHistoryCount: omittedCount,
+      receipt: receiptIdentity(response) };
     } catch {
       return options.signal?.aborted ? { kind: 'aborted' } : { kind: 'protocol_error',
         code: 'INVALID_STREAM', message: 'The response was incomplete or invalid. No assistant reply was recorded.',
@@ -637,4 +641,67 @@ export async function readChatStream(response, options = {}) {
     if (!eof) void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
+}
+
+/** @param {string | null} value */
+export function memoryId(value) { return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
+/** @param {Response} response */
+function receiptIdentity(response) {
+  const conversationId = response.headers.get('x-conversation-id');
+  const turnId = response.headers.get('x-turn-id'); const attemptId = response.headers.get('x-attempt-id');
+  return memoryId(conversationId) && memoryId(turnId) && memoryId(attemptId) ?
+    { conversationId: /** @type {string} */ (conversationId), turnId: /** @type {string} */ (turnId), attemptId: /** @type {string} */ (attemptId) } : undefined;
+}
+export class MemoryApiError extends Error {
+  /** @param {number} status */
+  constructor(status) { super('Conversation storage is unavailable or returned invalid data.'); this.status = status; }
+}
+/** Bounded JSON transport; no provider calls. @param {string} path
+ * @param {{fetchImpl?: typeof fetch, signal?: AbortSignal, method?: string, body?: object}} [options]
+ * @returns {Promise<any>} */
+export async function memoryRequest(path, options = {}) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener('abort', abort, { once: true });
+  if (options.signal?.aborted) abort();
+  const timer = setTimeout(abort, 10000);
+  let reader;
+  try {
+    const response = await withAbort((options.fetchImpl ?? globalThis.fetch)(path, { method: options.method ?? 'GET',
+      headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}) },
+      ...(options.body ? { body: JSON.stringify(options.body) } : {}), signal: controller.signal,
+      credentials: 'same-origin', cache: 'no-store', redirect: 'error' }), controller.signal);
+    if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) {
+      await response.body?.cancel(); throw new MemoryApiError(response.status);
+    }
+    reader = response.body?.getReader(); if (!reader) throw new MemoryApiError(0);
+    const decoder = new TextDecoder('utf-8', { fatal: true }); let text = ''; let size = 0;
+    while (true) {
+      const chunk = await withAbort(reader.read(), controller.signal);
+      if (chunk.done) break;
+      size += chunk.value.byteLength; if (size > 5 * 1024 * 1024) throw new MemoryApiError(0);
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    text += decoder.decode(); return JSON.parse(text);
+  } finally {
+    clearTimeout(timer); options.signal?.removeEventListener('abort', abort);
+    if (reader) { void reader.cancel().catch(() => {}); reader.releaseLock(); }
+  }
+}
+/** Validate the browser-consumed storage fields before DOM/history use.
+ * @param {any} v @returns {v is import('./api.js').StoredConversation} */
+export function validConversation(v) {
+  const message = (/** @type {any} */ m) => m && memoryId(m.id) && ['user','assistant'].includes(m.role) &&
+    typeof m.content === 'string' && m.content.trim() && m.content.length <= 32000 && isoDate(m.timestamp, false, true);
+  if (!v || v.schemaVersion !== 'recall.memory.v1' || !memoryId(v.id) || !Array.isArray(v.turns) || v.turns.length > 500 ||
+      !Array.isArray(v.seededMessages) || v.seededMessages.length > 1000 || !v.seededMessages.every(message)) return false;
+  const ids = new Set([v.id]); const unique = (/** @type {string} */ id) => { if (ids.has(id)) return false; ids.add(id); return true; };
+  if (!v.seededMessages.every((/** @type {any} */ m) => unique(m.id))) return false;
+  return v.turns.every((/** @type {any} */ t, /** @type {number} */ i) => memoryId(t.id) && unique(t.id) && t.ordinal === i && message(t.user) && unique(t.user.id) && t.user.role === 'user' &&
+    typeof t.key === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(t.key) && Array.isArray(t.attempts) && t.attempts.length <= 8 &&
+    t.attempts.every((/** @type {any} */ a) => memoryId(a.id) && unique(a.id) && typeof a.key === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(a.key) &&
+      ['running','generated','awaiting_receipt','accepted','partial','failed','cancelled','interrupted'].includes(a.status) &&
+      (!a.answer || validChatEvent('result', a.answer.result) && memoryId(a.answer.result.message.id) && unique(a.answer.result.message.id)) &&
+      (!['accepted','partial','generated','awaiting_receipt'].includes(a.status) || a.answer) &&
+      (a.status !== 'accepted' || a.answer.result.coverage === 'complete') && (a.status !== 'partial' || a.answer.result.coverage === 'partial')));
 }
