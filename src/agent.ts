@@ -8,6 +8,19 @@ import { AGENT_SYSTEM_PROMPT } from './prompts.js';
 import { abortOutcome, observeStage, sourceCounts, tokenUsage, type StageObserver, type StageOutcome, type ValidationCategory } from './observability.js';
 import { SEARCH_LIMITS, SearchArgumentsSchema, SearchSession, WEB_SEARCH_TOOL, type Source, type WebSearch } from './search.js';
 
+/** Select one exact contiguous excerpt; never join separated claims into a quotation. */
+function excerpt(text: string, query: string, size: number): string {
+  if (text.length <= size) return text;
+  const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [])];
+  let best = 0; let score = -1;
+  for (let at = 0; at < text.length; at += Math.max(1, Math.floor(size / 2))) {
+    const window = text.slice(at, at + size).toLowerCase();
+    const overlap = terms.filter((term) => window.includes(term)).length;
+    if (overlap > score) { best = at; score = overlap; }
+  }
+  return text.slice(best, best + size);
+}
+
 export const AGENT_LIMITS = Object.freeze({ deadlineMs: 25_000, modelTimeoutMs: 10_000,
   modelCalls: 3, maxOutputTokens: 2048, totalOutputTokens: 6144 });
 const RunOptionsSchema = z.strictObject({
@@ -66,6 +79,9 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
   const search = new SearchSession(options.search, deadline.signal, startedAt, options.observe, parsed.data.message);
   const issues = new Set<string>();
   const seenCallIds = new Set<string>();
+  const shownSources = new Set<string>();
+  const shownBodies = new Map<string, string>();
+  let contextLimitation: string | undefined;
   let messages: ModelMessage[] = [
     { role: 'system', content: AGENT_SYSTEM_PROMPT },
     // Preserve the supplied original history. Reject oversized context rather than silently
@@ -97,6 +113,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
         Math.min(AGENT_LIMITS.maxOutputTokens, limits.data.outputTokenBudget));
       if (!prepared.messages.length) return finish('answer', (isChangeRequest(parsed.data.message) ? 'Cannot verify: ' : '') + prepared.limitation);
       messages = prepared.messages;
+      contextLimitation = prepared.limitation;
     }
     const changeRequest = isChangeRequest(parsed.data.message);
     if (changeRequest) messages.splice(1, 0, { role: 'system', content: COMPARISON_INSTRUCTIONS });
@@ -166,7 +183,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
         if (performance.now() - startedAt >= limits.data.deadlineMs) return finish('deadline');
         deadline.signal.throwIfAborted();
         if (citationIds(answer).some((id) => !knownIds.has(id))) return finish('invalid_citation');
-        return finish('answer', answer);
+        return finish('answer', contextLimitation ? `${answer}\n\nContext limitation: ${contextLimitation}` : answer);
       }
       if (!tools.length) return finish('round_limit');
       if (response.finishReason !== 'tool_calls') return reject('invalid_response', 'finish_tool_mismatch');
@@ -183,11 +200,38 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       }
       messages.push({ role: 'assistant', content: response.text, toolCalls: response.toolCalls });
       const outcomes = await search.runRound(groups);
+      const fresh = search.sources.filter((s) => !shownSources.has(s.id));
+      const originals = new Map(fresh.map((s) => [s.id, s.text]));
+      const encode = () => {
+        const ids = new Set(shownSources); const bodies = new Map(shownBodies);
+        return outcomes.map((group, i): ModelMessage => ({ role: 'tool', toolCallId: response.toolCalls[i].id,
+          content: JSON.stringify(group.map((outcome) => ({ ...outcome, sources: outcome.sources.map((s) => {
+            if (ids.has(s.id)) return { id: s.id, previouslySupplied: true };
+            ids.add(s.id);
+            const textRef = bodies.get(s.text);
+            if (textRef) { const { text: _text, ...metadata } = s; return { ...metadata, textRef }; }
+            bodies.set(s.text, s.id); return s;
+          }) }))) }));
+      };
+      // Preserve room for the second round's framing/evidence. Only new, never-yet
+      // shown excerpts can change; registry, snapshots and checks use these exact texts.
+      const reserve = search.rounds === 1 ? Math.min(8192, Math.floor(options.provider.contextWindowTokens / 4)) : 0;
+      let toolMessages = encode();
+      for (let size = 1000; !contextFits({ messages: [...messages, ...toolMessages], tools: [WEB_SEARCH_TOOL], maxOutputTokens: AGENT_LIMITS.maxOutputTokens }, options.provider.contextWindowTokens, reserve) && size >= 125; size = Math.floor(size / 2)) {
+        for (const source of fresh) source.text = excerpt(originals.get(source.id)!, `${parsed.data.message} ${source.query}`, size);
+        contextLimitation = 'Research excerpts were shortened to fit the context budget; omitted text was not checked.';
+        toolMessages = encode();
+      }
+      if (!contextFits({ messages: [...messages, ...toolMessages], tools: [WEB_SEARCH_TOOL], maxOutputTokens: AGENT_LIMITS.maxOutputTokens }, options.provider.contextWindowTokens)) {
+        search.sources.splice(0, search.sources.length, ...search.sources.filter((s) => shownSources.has(s.id)));
+        return finish('answer', 'Cannot verify: essential history and research evidence cannot fit the context budget. Please narrow the question.');
+      }
+      for (const source of fresh) { shownSources.add(source.id); if (!shownBodies.has(source.text)) shownBodies.set(source.text, source.id); }
       for (let i = 0; i < outcomes.length; i++) {
         for (const outcome of outcomes[i]) {
           if (!['ok', 'duplicate'].includes(outcome.status)) issues.add(`search_${outcome.status}`);
         }
-        messages.push({ role: 'tool', toolCallId: response.toolCalls[i].id, content: JSON.stringify(outcomes[i]) });
+        messages.push(toolMessages[i]);
       }
       if (!options.search || performance.now() - startedAt >= SEARCH_LIMITS.cutoffMs || search.attempts >= SEARCH_LIMITS.total ||
           outcomes.flat().every((outcome) => outcome.status === 'duplicate')) toolsEnabled = false;

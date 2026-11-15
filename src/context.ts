@@ -192,11 +192,20 @@ export function prepareAgentContext(memory: RetrievedMemory, query: string, cont
     { role: 'user', content: query },
   ];
   const fits = (selected: HistoricalRecord[]) => (!memory.recall || Buffer.byteLength(JSON.stringify(memoryData(memory, selected))) <= RETRIEVAL_LIMITS.contextBytes) &&
-    contextFits({ messages: build(selected), tools: memory.memoryOnly ? [] : [WEB_SEARCH_TOOL], maxOutputTokens }, contextWindowTokens);
+    contextFits({ messages: build(selected), tools: memory.memoryOnly ? [] : [WEB_SEARCH_TOOL], maxOutputTokens }, contextWindowTokens,
+      memory.memoryOnly ? 0 : Math.min(28_672, Math.floor(contextWindowTokens / 2)));
   if (fits(memory.records)) return { messages: build(memory.records) };
   if (memory.recall) return { messages: [], limitation: 'The essential historical turns exceed the context limit. Narrow the date or topic; no shortlist was truncated.' };
-  // Ordinary active-conversation continuity: whole recent turns, with explicit omission.
-  const selected: HistoricalRecord[] = [];
-  for (const record of [...memory.records].reverse()) { if (!fits([record, ...selected])) break; selected.unshift(record); }
+  // Explicit shortlist references keep their whole original anchor even when old.
+  const anchors = /\b(?:those|these|shortlist|five|options)\b/i.test(query) ? memory.records.filter((r) =>
+    /\bshortlist(?:ed)?\b/i.test(`${r.user.content} ${r.assistant?.content ?? ''}`)) : [];
+  if (!fits(anchors)) return { messages: [], limitation: 'The essential shortlist turns exceed the context limit. Narrow the question; no shortlist was truncated.' };
+  const selected = [...anchors];
+  for (const record of [...memory.records].reverse()) {
+    if (selected.includes(record)) continue;
+    const next = memory.records.filter((r) => r === record || selected.includes(r));
+    if (!fits(next)) break;
+    selected.splice(0, selected.length, ...next);
+  }
   return { messages: build(selected), limitation: `${memory.records.length - selected.length} older whole turns omitted from context.` };
 }

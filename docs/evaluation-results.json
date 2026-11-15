@@ -10,7 +10,7 @@
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 160.75,
+      "localMs": 181.19,
       "abstention": "appropriate"
     },
     {
@@ -22,7 +22,7 @@
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 107.83,
+      "localMs": 116.23,
       "abstention": "appropriate"
     },
     {
@@ -34,7 +34,7 @@
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 83.66,
+      "localMs": 77.88,
       "abstention": "appropriate"
     },
     {
@@ -46,7 +46,7 @@
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 71.82,
+      "localMs": 90.92,
       "abstention": "none"
     },
     {
@@ -58,7 +58,7 @@
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 64.68,
+      "localMs": 73.68,
       "abstention": "none"
     },
     {
@@ -70,7 +70,7 @@
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 80.55,
+      "localMs": 77.02,
       "abstention": "appropriate"
     },
     {
@@ -82,7 +82,7 @@
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 86.01,
+      "localMs": 74.25,
       "abstention": "none"
     },
     {
@@ -94,7 +94,7 @@
       "quality": "PASS",
       "models": 1,
       "searches": 0,
-      "localMs": 109.76,
+      "localMs": 86.63,
       "abstention": "none"
     },
     {
@@ -106,7 +106,7 @@
       "quality": "PASS",
       "models": 1,
       "searches": 0,
-      "localMs": 97.94,
+      "localMs": 90.57,
       "abstention": "none"
     },
     {
@@ -118,7 +118,7 @@
       "quality": "PASS",
       "models": 1,
       "searches": 0,
-      "localMs": 104.03,
+      "localMs": 92.58,
       "abstention": "none"
     },
     {
@@ -130,7 +130,7 @@
       "quality": "PASS",
       "models": 1,
       "searches": 0,
-      "localMs": 79.06,
+      "localMs": 132.09,
       "abstention": "none"
     },
     {
@@ -142,7 +142,7 @@
       "quality": "PASS",
       "models": 1,
       "searches": 0,
-      "localMs": 86.7,
+      "localMs": 106.74,
       "abstention": "none"
     },
     {
@@ -154,7 +154,7 @@
       "quality": "PASS",
       "models": 1,
       "searches": 0,
-      "localMs": 98.72,
+      "localMs": 104.04,
       "abstention": "none"
     },
     {
@@ -166,7 +166,7 @@
       "quality": "PASS",
       "models": 0,
       "searches": 0,
-      "localMs": 55.87,
+      "localMs": 71.77,
       "abstention": "none"
     },
     {
@@ -178,7 +178,7 @@
       "quality": "PASS",
       "models": 1,
       "searches": 0,
-      "localMs": 105.53,
+      "localMs": 101.82,
       "abstention": "none"
     },
     {
@@ -190,67 +190,67 @@
       "quality": "PASS",
       "models": 1,
       "searches": 0,
-      "localMs": 101.43,
+      "localMs": 108.16,
       "abstention": "none"
     },
     {
       "id": "C1",
       "category": "comparison",
       "expected": "Confirmed change",
-      "actual": "1. Confirmed change — neon: Explicit comparable evidence records a price increase.\nCurrent excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 30; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-17.” [S1]\nHistorical excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 20; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-15.” (original 27aa8464-09f6-47de-8479-7f432cdb9aca/ccf474bb-efd7-47f4-94d3-c14ede61c5e2/S1 at 2026-11-16T12:00:00.000Z)\n\nSupported comparisons: 1 of 1. Quote matches and constrained comparison rules do not establish full factual verification or complete market coverage.",
+      "actual": "1. Confirmed change — neon: Explicit comparable evidence records a price increase.\nCurrent excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 30; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-17.” [S1]\nHistorical excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 20; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-15.” (original b5feb34a-3e79-4e4b-893b-17fee482a57a/2b3ceaad-f0c2-4b50-898b-63a4500a6664/S1 at 2026-11-16T12:00:00.000Z)\n\nSupported comparisons: 1 of 1. Quote matches and constrained comparison rules do not establish full factual verification or complete market coverage.",
       "safety": "PASS",
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 98.74,
+      "localMs": 91.44,
       "abstention": "none"
     },
     {
       "id": "C2",
       "category": "comparison",
       "expected": "Confirmed change",
-      "actual": "1. Confirmed change — neon: Explicit comparable evidence records a price decrease.\nCurrent excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 10; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-17.” [S1]\nHistorical excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 20; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-15.” (original f9497d56-a9a2-49e9-8dd2-af28c41d2fd3/af1112fc-8524-485a-9b4c-5885b50db63b/S1 at 2026-11-16T12:00:00.000Z)\n\nSupported comparisons: 1 of 1. Quote matches and constrained comparison rules do not establish full factual verification or complete market coverage.",
+      "actual": "1. Confirmed change — neon: Explicit comparable evidence records a price decrease.\nCurrent excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 10; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-17.” [S1]\nHistorical excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 20; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-15.” (original a7014b17-0672-42ae-b285-dec03cc45b32/8a473c08-e4ec-4684-82cf-7c1327a117fd/S1 at 2026-11-16T12:00:00.000Z)\n\nSupported comparisons: 1 of 1. Quote matches and constrained comparison rules do not establish full factual verification or complete market coverage.",
       "safety": "PASS",
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 92.25,
+      "localMs": 102.1,
       "abstention": "none"
     },
     {
       "id": "C3",
       "category": "comparison",
       "expected": "No confirmed change",
-      "actual": "1. No confirmed change — neon: The quoted comparable price is equal; this does not establish that everything is unchanged.\nCurrent excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 20; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-17.” [S1]\nHistorical excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 20; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-15.” (original ab4ce42e-62f6-40a4-90ff-03c60215a96b/8ad16192-1719-4ea7-8d8f-8e2a5b3c4f7a/S1 at 2026-11-16T12:00:00.000Z)\n\nSupported comparisons: 1 of 1. Quote matches and constrained comparison rules do not establish full factual verification or complete market coverage.",
+      "actual": "1. No confirmed change — neon: The quoted comparable price is equal; this does not establish that everything is unchanged.\nCurrent excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 20; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-17.” [S1]\nHistorical excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 20; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-15.” (original 6c88fecc-efb1-4d4c-a75f-f2cc52e164ea/5441b638-b409-49eb-a115-9c8936168588/S1 at 2026-11-16T12:00:00.000Z)\n\nSupported comparisons: 1 of 1. Quote matches and constrained comparison rules do not establish full factual verification or complete market coverage.",
       "safety": "PASS",
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 83.49,
+      "localMs": 94.53,
       "abstention": "none"
     },
     {
       "id": "C4",
       "category": "comparison",
       "expected": "Not comparable",
-      "actual": "1. Not comparable — neon: Product, plan, region, currency, billing, seats, basis or material conditions differ.\nCurrent excerpt: “Product: Neon; Plan: Scale; Region: US; Currency: USD; Price: 30; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-17.” [S1]\nHistorical excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 20; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-15.” (original 8666158f-0f4d-4e3b-836f-bfa433d33dd7/3a394000-c989-428b-9612-fa92d55f024f/S1 at 2026-11-16T12:00:00.000Z)\n\nSupported comparisons: 0 of 1. Quote matches and constrained comparison rules do not establish full factual verification or complete market coverage.",
+      "actual": "1. Not comparable — neon: Product, plan, region, currency, billing, seats, basis or material conditions differ.\nCurrent excerpt: “Product: Neon; Plan: Scale; Region: US; Currency: USD; Price: 30; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-17.” [S1]\nHistorical excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 20; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-15.” (original 3bd175a9-86ae-476a-823e-6876e898ba77/b7e74691-87b1-4d4b-8a25-d51fa1bf3127/S1 at 2026-11-16T12:00:00.000Z)\n\nSupported comparisons: 0 of 1. Quote matches and constrained comparison rules do not establish full factual verification or complete market coverage.",
       "safety": "PASS",
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 105,
+      "localMs": 89.75,
       "abstention": "none"
     },
     {
       "id": "C5",
       "category": "comparison",
       "expected": "Not comparable",
-      "actual": "1. Not comparable — neon: Product, plan, region, currency, billing, seats, basis or material conditions differ.\nCurrent excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: EUR; Price: 30; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-17.” [S1]\nHistorical excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 20; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-15.” (original a10bc5f1-02ab-43cb-a6c0-745022c7e0d6/f694fde4-0dda-4ee7-95fa-2e994fc5a876/S1 at 2026-11-16T12:00:00.000Z)\n\nSupported comparisons: 0 of 1. Quote matches and constrained comparison rules do not establish full factual verification or complete market coverage.",
+      "actual": "1. Not comparable — neon: Product, plan, region, currency, billing, seats, basis or material conditions differ.\nCurrent excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: EUR; Price: 30; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-17.” [S1]\nHistorical excerpt: “Product: Neon; Plan: Launch; Region: US; Currency: USD; Price: 20; Billing: monthly; Seats: 1; Basis: per-seat; Conditions: standard; Effective: 2026-11-15.” (original 69f66162-f8b8-4efb-8f5d-c9598c8e8fb6/ef99fd6a-1a21-49de-a7cf-4c69ebd55f0f/S1 at 2026-11-16T12:00:00.000Z)\n\nSupported comparisons: 0 of 1. Quote matches and constrained comparison rules do not establish full factual verification or complete market coverage.",
       "safety": "PASS",
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 86.22,
+      "localMs": 92.11,
       "abstention": "none"
     },
     {
@@ -262,7 +262,7 @@
       "quality": "FAIL",
       "models": 2,
       "searches": 1,
-      "localMs": 87.78,
+      "localMs": 82.53,
       "abstention": "excessive"
     },
     {
@@ -274,7 +274,7 @@
       "quality": "FAIL",
       "models": 2,
       "searches": 1,
-      "localMs": 93.42,
+      "localMs": 86.22,
       "abstention": "excessive"
     },
     {
@@ -286,7 +286,7 @@
       "quality": "FAIL",
       "models": 2,
       "searches": 1,
-      "localMs": 108.61,
+      "localMs": 105.55,
       "abstention": "excessive"
     },
     {
@@ -298,7 +298,7 @@
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 76.46,
+      "localMs": 76.78,
       "abstention": "appropriate"
     },
     {
@@ -310,7 +310,7 @@
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 95.68,
+      "localMs": 98.89,
       "abstention": "appropriate"
     },
     {
@@ -322,7 +322,7 @@
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 90.08,
+      "localMs": 98.85,
       "abstention": "appropriate"
     },
     {
@@ -334,7 +334,7 @@
       "quality": "PASS",
       "models": 1,
       "searches": 0,
-      "localMs": 68.27,
+      "localMs": 61.2,
       "abstention": "none"
     },
     {
@@ -370,7 +370,7 @@
       "quality": "PASS",
       "models": 2,
       "searches": 1,
-      "localMs": 77.36,
+      "localMs": 75.97,
       "abstention": "none"
     }
   ]

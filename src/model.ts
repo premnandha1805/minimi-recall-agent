@@ -54,10 +54,10 @@ export class ModelProviderError extends Error {
 }
 
 /** Conservative UTF-8 byte upper bound plus room for message framing; no tokenizer claim. */
-export function contextFits(request: Omit<ModelRequest, 'signal'>, contextWindowTokens: number): boolean {
+export function contextFits(request: Omit<ModelRequest, 'signal'>, contextWindowTokens: number, reserveBytes = 0): boolean {
   const bytes = Buffer.byteLength(JSON.stringify({ messages: request.messages, tools: request.tools }), 'utf8');
-  return bytes <= MAX_CONTEXT_BYTES &&
-    bytes + 64 * (request.messages.length + 1) + request.maxOutputTokens <= contextWindowTokens;
+  return bytes + reserveBytes <= MAX_CONTEXT_BYTES &&
+    bytes + reserveBytes + 64 * (request.messages.length + 1) + request.maxOutputTokens <= contextWindowTokens;
 }
 
 const AzureResponseSchema = z.object({

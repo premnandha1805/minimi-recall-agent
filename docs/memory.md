@@ -283,6 +283,22 @@ eligible records if they fit the existing context window (without the recall-onl
 omission count. Essential recall turns are never cut mid-shortlist: if they cannot
 fit, return a limitation asking for a narrower request. This is not exact tokenization.
 The existing 65,536-byte/context-window limits still apply to each model call.
+For search-enabled requests, history selection reserves up to 28,672 bytes
+(at most half the configured context window) for research and comparison framing.
+Ordinary continuity falls back to whole recent turns, and the final answer discloses
+omissions. Essential recall records must fit intact with this reserve or the agent
+returns an explicit limitation before calling providers.
+References to a shortlist/options also retain whole explicitly labeled shortlist
+turns from active continuity, even if older than the recent suffix. If those
+anchors cannot fit, the agent asks for a narrower question before researching.
+
+Tool results emit each source ID/body once, then use ID or identical-text references.
+If needed, fresh source excerpts shrink deterministically to a relevant contiguous
+window (1,000, 500, 250 or 125 characters); previously shown evidence never changes.
+The first round also attempts to leave 8 KiB for subsequent research. Registry,
+quotation checks and saved snapshots use the exact selected text. Excerpt reduction
+is disclosed in the answer. Oversized essential framing returns a limitation rather
+than increasing execution limits. These are conservative byte budgets, not tokens.
 
 Historical originals and source snapshots stay unchanged on disk and in retrieval
 results. Model-context projection replaces citation markers with qualified

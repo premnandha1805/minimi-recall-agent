@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { retrieveMemory, memoryData, prepareAgentContext, recallIntent } from '../src/context.js';
+import { retrieveMemory, memoryData, prepareAgentContext, recallIntent, type RetrievedMemory } from '../src/context.js';
 import { ConversationSchema, ConversationStore, type Conversation } from '../src/memory.js';
 import { runAgent } from '../src/agent.js';
 import { buildServer } from '../src/server.js';
@@ -26,6 +26,24 @@ const opts = (query: string) => ({ query, activeConversationId: id(999), current
   timezone: 'UTC', signal: new AbortController().signal, startedAt: performance.now(), deadlineMs: 25000 });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 describe('deterministic stored retrieval and agent context', () => {
+  it('Gate 7C synthesizes after ten large turns and both research rounds', async () => {
+    const memory: RetrievedMemory = { reference: { instant: '2026-11-17T12:00:00Z', timezone: 'UTC' }, recall: false, memoryOnly: false,
+      status: 'found', matches: 10, records: Array.from({ length: 10 }, (_, n) => ({ conversationId: id(10), turnId: id(100+n), ordinal: n,
+        provenance: 'server_recorded', user: { id: id(200+n), content: 'u'.repeat(1000), timestamp: '2026-11-03T10:00:00Z' },
+        assistant: { id: id(300+n), content: 'a'.repeat(3500), timestamp: '2026-11-03T10:01:00Z' }, evidence: [] })) };
+    memory.records[0].user.content = 'Our CRM shortlist';
+    memory.records[0].assistant!.content = 'HubSpot, Zoho, Pipedrive, Freshsales, Salesforce';
+    let calls = 0;
+    const response = await runAgent({ message: 'Research those five options and current hosting' }, { memory, signal: new AbortController().signal,
+      provider: { contextWindowTokens: 100000, complete: async (request) => {
+        expect(JSON.stringify(request.messages)).toContain('HubSpot, Zoho, Pipedrive, Freshsales, Salesforce');
+        return ++calls <= 2 ? { text: '', finishReason: 'tool_calls',
+        toolCalls: [{ id: `q${calls}`, name: 'web_search', arguments: JSON.stringify({ queries: Array.from({ length: calls === 1 ? 5 : 3 }, (_, n) => `round ${calls} query ${n}`) }) }] } :
+        { text: 'Available hosting [S1]', toolCalls: [], finishReason: 'stop' }; } },
+      search: async (query) => Array.from({ length: 3 }, (_, n) => ({ title: query, url: `https://example.com/${encodeURIComponent(query)}/${n}`, text: `${query} ${n} ` + 'e'.repeat(1900), retrieved_at: '2026-11-17T12:00:00Z' })) });
+    expect(response.reason).toBe('answer'); expect(response.stats.searchRequests).toBe(8);
+    expect(response.answer).toContain('omitted');
+  });
   const challengeCases = [
     ['On Monday we shortlisted five CRM tools. Have any changed pricing or released something important?', 'CRM shortlist', '2026-11-16'],
     ['What did I ask on 3 November? Is your answer still correct today?', 'Postgres hosting', '2026-11-03'],

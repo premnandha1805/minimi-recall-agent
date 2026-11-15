@@ -42,6 +42,47 @@ async function send(text = 'Original question') {
   await flush(); await flush();
 }
 describe('server-authoritative browser restoration and receipts', () => {
+  it.each([false, true])('Gate 7C keeps visible failed receipts recoverable and ignores navigation (navigate=%s)', async (navigate) => {
+    let body: any; let release!: () => void;
+    const { app } = await mount(async (url, init) => {
+      if (url.includes('?offset')) return json({ total: 0, items: [] });
+      if (url === '/api/conversations') return json({ ...conversation(), turns: [] });
+      if (url === '/api/chat') {
+        body = JSON.parse(String(init?.body)); return new Response(streamText(answer).replace(meta.conversationId, body.conversationId), { headers: {
+          'content-type': 'text/event-stream', 'x-conversation-id': id, 'x-turn-id': tid, 'x-attempt-id': aid } });
+      }
+      if (url.endsWith('/receipt')) return new Promise((r) => { release = () => r(json({}, 503)); });
+      const value = conversation('awaiting_receipt'); value.turns[0].key = body.turn.key; return json(value);
+    }, false);
+    await send(); expect(document.querySelector('.assistant-answer-card')?.textContent).toContain('Saved');
+    const owner = app.getActiveSession();
+    if (navigate) app.startNewConversation();
+    release(); await flush(); await flush();
+    expect(owner.history.some((m) => m.role === 'assistant')).toBe(false);
+    if (navigate) { expect(app.getActiveSession()).not.toBe(owner); expect(app.getActiveSession().history).toEqual([]); }
+    else { expect(document.body.textContent).toContain('receipt was not confirmed'); expect(document.querySelector('[data-action="recover-receipt"]')).not.toBeNull(); }
+  });
+  it('Gate 7C displays validated answers before synchronization and receipt, accepting only after receipt', async () => {
+    let body: any; let releaseSync!: () => void; let releaseReceipt!: () => void;
+    const { app } = await mount(async (url, init) => {
+      if (url.includes('?offset')) return json({ total: 0, items: [] });
+      if (url === '/api/conversations') return json({ ...conversation(), turns: [] });
+      if (url === '/api/chat') {
+        body = JSON.parse(String(init?.body)); return new Response(streamText(answer).replace(meta.conversationId, body.conversationId), { headers: {
+          'content-type': 'text/event-stream', 'x-conversation-id': id, 'x-turn-id': tid, 'x-attempt-id': aid } });
+      }
+      if (url.endsWith('/receipt')) return new Promise((r) => { releaseReceipt = () => r(json({ status: 'accepted', answer: { result: answer } })); });
+      const value = conversation('awaiting_receipt'); value.turns[0].key = body.turn.key;
+      return new Promise((r) => { releaseSync = () => r(json(value)); });
+    }, false);
+    await send(); expect(document.querySelector('.assistant-answer-card')?.textContent).toContain('Saved');
+    expect(app.getActiveSession().history.some((m) => m.role === 'assistant')).toBe(false);
+    releaseSync(); await flush(); await flush();
+    expect(document.querySelector('.assistant-answer-card')?.textContent).toContain('Saved');
+    expect(app.getActiveSession().history.some((m) => m.role === 'assistant')).toBe(false);
+    releaseReceipt(); await flush(); await flush();
+    expect(app.getActiveSession().history.filter((m) => m.role === 'assistant')).toHaveLength(1);
+  });
   it('discloses backend disk persistence after restoration and on errors', async () => {
     await mount(async (url) => url.includes('?offset') ? json({ total: 1, items: [{ id }] }) : url === '/api/chat' ? json({}, 503) : json(conversation()));
     expect(document.body.textContent).toContain('Saved locally on this server');

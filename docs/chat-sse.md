@@ -167,6 +167,14 @@ complete SSE results after clean EOF. Pending recovery uses memory HTTP endpoint
 not chat. Receipt failures and research-partial answers are excluded from trusted
 assistant history. See [browser memory behavior](memory.md#milestone-4-browser-integration).
 
+After valid result/done and clean EOF, the browser renders the answer immediately
+with pending synchronization/receipt status. Conversation synchronization and the
+receipt request continue afterward; only a matching accepted receipt promotes the
+assistant into history. Failed receipts retain the visible answer and recovery
+action. Navigation guards prevent stale callbacks from changing another view.
+Cancellation during synchronization still prevents acceptance. No SSE event or
+public result schema changes are involved.
+
 Constrained quotation/change checks now run before final result delivery; see
 [verification limits](verification.md). The transport evidenceCheck field and all
 event schemas remain unchanged; they do not certify general factual correctness.

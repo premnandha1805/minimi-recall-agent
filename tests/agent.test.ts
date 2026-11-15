@@ -32,6 +32,33 @@ const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve()
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe('bounded internal agent core (offline fixtures)', () => {
+  it('Gate 7C references repeated IDs and identical bodies once without changing sources', async () => {
+    const provider = sequence(tools(call('first', ['one','two'])), tools(call('second', ['three'])), answer('Evidence [S1] [S2]'));
+    const result = await runAgent({ message: 'Research' }, { provider, signal: freshSignal(), search: async (query) => [
+      { ...document('same'), text: 'Identical source evidence' }, { ...document(query), text: 'Identical source evidence' }] });
+    expect(result.reason).toBe('answer');
+    const messages = provider.complete.mock.calls[2][0].messages.filter((m) => m.role === 'tool');
+    expect(messages.map((m) => m.content).join(' ')).toContain('textRef');
+    expect(messages.map((m) => m.content).join(' ')).toContain('previouslySupplied');
+    expect(messages.map((m) => m.content).join(' ').match(/Identical source evidence/g)).toHaveLength(1);
+    expect(result.sources.every((s) => s.text === 'Identical source evidence')).toBe(true);
+  });
+  it.each([true, false])('Gate 7C validates selected quotes and rejects discarded text (valid=%s)', async (valid) => {
+    let seenText = '';
+    const history = Array.from({ length: 10 }, (_, n) => ({ role: 'user' as const, content: `${n}` + 'h'.repeat(2500), timestamp: '2026-11-03T10:00:00Z' }));
+    let calls = 0;
+    const result = await runAgent({ message: 'hosting' , history }, { signal: freshSignal(),
+      provider: { contextWindowTokens: 65536, complete: async (request) => {
+        if (++calls === 1) return tools(call('search', ['one','two','three','four','five']));
+        seenText = JSON.parse(request.messages.find((m) => m.role === 'tool')!.content)[0].sources[0].text;
+        return answer(valid ? '“hosting one0” [S1]' : '“Discarded original statement” [S1]');
+      } }, search: async (query) => Array.from({ length: 3 }, (_, n) => ({ ...document(`${query}${n}`),
+        text: 'Discarded original statement ' + 'x'.repeat(1200) + ` hosting ${query}${n} ` + 'z'.repeat(700) })) });
+    expect(seenText).not.toContain('Discarded original statement');
+    expect(result.sources[0].text).toBe(seenText);
+    expect(result.answer).toContain(valid ? 'hosting one0' : 'quotation warning');
+    if (valid) expect(result.answer).not.toContain('quotation warning');
+  });
   it('answers without search, preserves supplied history, and reports only actual usage', async () => {
     const provider = sequence({ ...answer(), usage: { inputTokens: 20, outputTokens: 5 } });
     const result = await runAgent({ message: 'those five?', history: [{ role: 'user', content: '  original shortlist  ',

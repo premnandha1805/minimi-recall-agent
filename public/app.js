@@ -1001,7 +1001,13 @@ export function createChatApp(options = {}) {
     answerCard.appendChild(content);
     if (entry.receiptStatus) {
       answerCard.appendChild(el(doc, 'p', 'research-limitation', entry.receiptStatus));
-      if (entry.receipt && entry.result?.coverage === 'complete') {
+      if (activeRequest?.sessionId === activeSession.id && entry.receiptStatus.includes('synchronization and receipt are pending')) {
+        const pendingRequest = activeRequest;
+        const cancel = el(doc, 'button', 'btn-danger-ghost', 'Cancel synchronization');
+        cancel.dataset.action = 'cancel-request';
+        cancel.addEventListener('click', () => { if (activeRequest === pendingRequest) abortActiveRequest(); });
+        answerCard.appendChild(cancel);
+      } else if (entry.receipt && entry.result?.coverage === 'complete') {
         const recover = el(doc, 'button', 'btn-primary-sm', 'Recover / retry receipt');
         recover.dataset.action = 'recover-receipt';
         const owner = activeSession;
@@ -1245,26 +1251,40 @@ export function createChatApp(options = {}) {
       },
     );
 
+    // Successful sendChatRequest means validated result/done plus clean EOF.
+    // Display it now; identity synchronization and receipt are separate acceptance work.
+    const completionNavigation = navigation;
+    /** @type {ThreadAssistantEntry | undefined} */ let visibleAnswer;
+    if (result.kind === 'ok' && result.result && !requestState.controller.signal.aborted &&
+        targetSession.entries.find((e) => e.id === loadingEntryId) === loadingEntry) {
+      visibleAnswer = { id: loadingEntryId, kind: 'assistant', text: result.result.message.content,
+        timestamp: result.result.message.timestamp, result: result.result,
+        ...(persistence ? { receipt: result.receipt, receiptStatus: result.result.coverage === 'partial' ?
+          'Partial answer retained; it is excluded from assistant history.' : 'Answer received; server synchronization and receipt are pending.' } : {}) };
+      targetSession.entries.splice(loadingIndex, 1, visibleAnswer);
+      if (activeSession === targetSession) renderWorkspace();
+    }
     let synchronized = !persistence;
     if (persistence && memoryId(targetSession.id) && !listenerController.signal.aborted && !requestState.controller.signal.aborted) {
       try {
         const value = await stored(`/api/conversations/${targetSession.id}`, { signal: AbortSignal.any([requestState.controller.signal, listenerController.signal]) });
         if (!validConversation(value) || value.id !== targetSession.id) throw new Error('Invalid conversation');
         const turn = value.turns.find((t) => t.key === submission.key);
-        if (turn && targetSession.entries.find((e) => e.id === loadingEntryId) === loadingEntry) {
+        if (completionNavigation !== navigation || requestState.controller.signal.aborted) return;
+        if (turn && targetSession.entries.find((e) => e.id === loadingEntryId) === (visibleAnswer ?? loadingEntry)) {
           const oldId = userEntry.id; const item = targetSession.history.find((m) => m.id === oldId);
           const keys = submissions.get(oldId); if (keys) { submissions.delete(oldId); submissions.set(turn.user.id, keys); }
           userEntry.id = turn.user.id; userEntry.timestamp = turn.user.timestamp; userEntry.text = turn.user.content;
           if (item) Object.assign(item, turn.user); synchronized = true;
         }
-      } catch { if (!requestState.controller.signal.aborted) memoryStatus.textContent = 'Server turn state could not be synchronized. Refresh conversations before relying on this history.'; }
+      } catch { if (completionNavigation === navigation && !requestState.controller.signal.aborted) memoryStatus.textContent = 'Server turn state could not be synchronized. Refresh conversations before relying on this history.'; }
     }
 
     if (requestState.controller.signal.aborted) result.kind = 'aborted';
 
     // A completion owns only the loading slot that started it. A newer attempt
     // may already have replaced that slot after cancellation.
-    if (targetSession.entries.find((item) => item.id === loadingEntryId) !== loadingEntry) return;
+    if (completionNavigation !== navigation || targetSession.entries.find((item) => item.id === loadingEntryId) !== (visibleAnswer ?? loadingEntry)) return;
     if (activeRequest?.requestToken === requestToken) {
       activeRequest = null;
     }
@@ -1294,6 +1314,7 @@ export function createChatApp(options = {}) {
         timestamp: answer.message.timestamp, result: answer,
         ...(persistence ? { receipt: result.receipt, receiptStatus: answer.coverage === 'partial' ? 'Partial answer retained; it is excluded from assistant history.' : result.receipt ? 'Answer received; server receipt is pending.' : 'Receipt identifiers are missing; this answer is excluded from assistant history.' } : {}) };
       replaceEntry(assistant);
+      if (activeSession === targetSession) renderWorkspace();
       if (persistence) {
         if (result.receipt) targetSession.id = result.receipt.conversationId;
         remoteSessions.add(targetSession.id);
@@ -1301,6 +1322,7 @@ export function createChatApp(options = {}) {
         if (answer.coverage === 'complete' && result.receipt && synchronized) await receiveStoredAnswer(targetSession, assistant, false);
         else if (!synchronized) assistant.receiptStatus = 'Server turn identity could not be synchronized. Refresh conversations before continuing this history.';
       }
+      if (completionNavigation !== navigation || listenerController.signal.aborted) return;
       if (!persistence && answer.coverage === 'complete' && !targetSession.history.some((item) => item.id === answer.message.id)) {
         // Completion time is not turn order: an older retry belongs immediately
         // after its original user message, before any later user/assistant turns.
@@ -1498,7 +1520,7 @@ export function createChatApp(options = {}) {
         if (at >= 0) session.history.splice(at + 1, 0, { ...answer.message });
       }
     } catch {
-      if (!listenerController.signal.aborted && session.entries.includes(entry)) entry.receiptStatus = 'Answer is visible, but receipt was not confirmed. Retry receipt before using it as conversation history.';
+      if (!listenerController.signal.aborted && version === navigation && session.entries.includes(entry)) entry.receiptStatus = 'Answer is visible, but receipt was not confirmed. Retry receipt before using it as conversation history.';
     }
     if (activeSession === session && !listenerController.signal.aborted) renderWorkspace();
   }
