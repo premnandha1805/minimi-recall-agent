@@ -166,3 +166,7 @@ conversation ID, restores server messages and sources, and explicitly acknowledg
 complete SSE results after clean EOF. Pending recovery uses memory HTTP endpoints,
 not chat. Receipt failures and research-partial answers are excluded from trusted
 assistant history. See [browser memory behavior](memory.md#milestone-4-browser-integration).
+
+Constrained quotation/change checks now run before final result delivery; see
+[verification limits](verification.md). The transport evidenceCheck field and all
+event schemas remain unchanged; they do not certify general factual correctness.

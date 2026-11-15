@@ -1562,7 +1562,7 @@ describe('Recall Agent Chat UI (public/index.html + app.js + api.js)', () => {
     expect(sourceList.querySelectorAll('.source-entry')).toHaveLength(6);
 
     const disclaimer = disclosure.querySelector('.sources-disclaimer') as HTMLElement;
-    expect(disclaimer.textContent).toContain('Citation IDs checked only. Quotations and factual claims have not been verified.');
+    expect(disclaimer.textContent).toContain('Source IDs are registry-checked. Quotation matching, when reported, is limited to available snippets; factual claims are not independently verified.');
 
     // Toggle details open when near bottom
     disclosure.open = true;

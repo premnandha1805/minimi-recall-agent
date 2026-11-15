@@ -1,4 +1,5 @@
-import { prepareAgentContext, type RetrievedMemory } from './context.js';
+import { isChangeRequest, COMPARISON_INSTRUCTIONS, verifyChangeAnswer, checkSourceQuotations } from './verification.js';
+import { memoryData, prepareAgentContext, type RetrievedMemory } from './context.js';
 import { z } from 'zod';
 import { ChatRequestSchema, citationIds, type ChatRequest } from './contracts.js';
 import { createDeadlineScope, ExecutionTimeoutError, runWithSignal } from './execution.js';
@@ -94,9 +95,11 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       if (memory.memoryOnly && memory.status === 'limited') return finish('answer', memory.limitation ?? 'Historical coverage is limited. Please narrow the date or topic.');
       const prepared = prepareAgentContext(memory, parsed.data.message, options.provider.contextWindowTokens,
         Math.min(AGENT_LIMITS.maxOutputTokens, limits.data.outputTokenBudget));
-      if (!prepared.messages.length) return finish('answer', prepared.limitation);
+      if (!prepared.messages.length) return finish('answer', (isChangeRequest(parsed.data.message) ? 'Cannot verify: ' : '') + prepared.limitation);
       messages = prepared.messages;
     }
+    const changeRequest = isChangeRequest(parsed.data.message);
+    if (changeRequest) messages.splice(1, 0, { role: 'system', content: COMPARISON_INSTRUCTIONS });
     for (let step = 0; step < AGENT_LIMITS.modelCalls; step++) {
       if (performance.now() - startedAt >= limits.data.deadlineMs) return finish('deadline');
       deadline.signal.throwIfAborted();
@@ -153,7 +156,17 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
         if (!response.text.trim()) return reject('empty_output', 'empty_text');
         const knownIds = new Set(search.sources.map((source) => source.id));
         if (citationIds(response.text).some((id) => !knownIds.has(id))) return finish('invalid_citation');
-        return finish('answer', response.text);
+        let answer = response.text;
+        // Historical citation markers are projected in model context; verify that
+        // exact representation rather than the untouched on-disk snapshots.
+        if (changeRequest) answer = options.memory ? verifyChangeAnswer(response.text, memoryData(options.memory), search.sources, issues.size > 0) :
+          'Cannot verify: no supported historical baseline was supplied.';
+        else if (/(?<!no )\bconfirmed change\b/i.test(answer)) answer = 'Cannot verify: a change verdict was not established by deterministic evidence comparison.';
+        if (!checkSourceQuotations(answer, search.sources)) answer = 'Cannot verify: quotation warning: a cited quotation did not match the exact available source text. No unsupported quotation or change claim is accepted.';
+        if (performance.now() - startedAt >= limits.data.deadlineMs) return finish('deadline');
+        deadline.signal.throwIfAborted();
+        if (citationIds(answer).some((id) => !knownIds.has(id))) return finish('invalid_citation');
+        return finish('answer', answer);
       }
       if (!tools.length) return finish('round_limit');
       if (response.finishReason !== 'tool_calls') return reject('invalid_response', 'finish_tool_mismatch');

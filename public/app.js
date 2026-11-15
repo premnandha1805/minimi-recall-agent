@@ -1014,7 +1014,7 @@ export function createChatApp(options = {}) {
       const panelState = sourcePanelState.get(entry.id);
       disclosure.open = panelState?.open ?? false;
       disclosure.appendChild(el(doc, 'summary', '', `Sources (${sources.size})`));
-      disclosure.appendChild(el(doc, 'p', 'sources-disclaimer', 'Citation IDs checked only. Quotations and factual claims have not been verified.'));
+      disclosure.appendChild(el(doc, 'p', 'sources-disclaimer', 'Source IDs are registry-checked. Quotation matching, when reported, is limited to available snippets; factual claims are not independently verified.'));
       const list = el(doc, 'div', 'source-list');
       for (const source of sources.values()) {
         const item = el(doc, 'div', 'source-entry');

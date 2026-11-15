@@ -1,3 +1,4 @@
+import { isChangeRequest } from './verification.js';
 import { createTemporalResolver, type TemporalResult } from './dates.js';
 import type { Conversation, ConversationStore } from './memory.js';
 import { contextFits, type ModelMessage } from './model.js';
@@ -22,7 +23,8 @@ export interface RetrievedMemory {
 }
 const stopWords = new Set(('what did i you we our the a an on in at to from earlier previous past last discuss discussion discussed ask asked tell me ' +
   'which five tools shortlist shortlisted summarize summarise conversation conversations about and of was were with has have changed now current latest ' +
-  'today yesterday monday tuesday wednesday thursday friday saturday sunday week days ago november january february march april may june july august september october december').split(' '));
+  'is have any product products prices price your recommendation correct major new feature launch launched since this discussed '
+  + 'today yesterday monday tuesday wednesday thursday friday saturday sunday week days ago november january february march april may june july august september october december').split(' '));
 function keywords(text: string): string[] {
   return [...new Set(text.normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])]
     .map((v) => v === 'postgresql' ? 'postgres' : v === 'crms' ? 'crm' : v)
@@ -30,13 +32,14 @@ function keywords(text: string): string[] {
 }
 /** Recognize recall intent only. External fact dates never silently select conversations. */
 export function recallIntent(query: string) {
-  const recall = /\b(?:what did (?:i|we)|which .{0,80}did we|summari[sz]e our (?:earlier|previous)|earlier conversation|recall|remember|our earlier)\b/i.test(query);
-  const memoryOnly = recall && !/\b(?:now|current|latest|changed|compare|verify|update|still)\b/i.test(query);
+  const recall = isChangeRequest(query) || /\b(?:what did (?:i|we)|which .{0,80}did we|summari[sz]e our (?:earlier|previous)|earlier conversation|recall|remember|our earlier)\b/i.test(query);
+  const memoryOnly = recall && !isChangeRequest(query) && !/\b(?:now|current|latest|changed|compare|verify|update|still)\b/i.test(query);
   return { recall, memoryOnly };
 }
 function dateHint(query: string): string | undefined {
   const relative = query.match(/\b(?:yesterday|today|last (?:sunday|monday|tuesday|wednesday|thursday|friday|saturday|week)|\d+ days? ago)\b/gi) ?? [];
-  const explicit = query.match(/\b(?:on|from|during)\s+([^?!]+)(?:[?!]|$)/i)?.[1]?.trim();
+  const since = query.match(/\bsince\s+((?:last )?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|\d{4}-\d{2}-\d{2})\b/i)?.[1];
+  const explicit = since ?? query.match(/\b(?:on|from|during)\s+([^?!]+)(?:[?!]|$)/i)?.[1]?.trim();
   if (relative.length > 1) return 'unsupported multiple temporal references';
   return relative[0] ?? explicit ?? query.match(/\b(?:last|next|this) (?:month|year|week)\b/i)?.[0];
 }

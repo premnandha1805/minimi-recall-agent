@@ -11,8 +11,9 @@ browser to the existing Azure OpenAI v1 and Tavily adapters using SSE progress
 plus one validated final/partial answer. Azure uses `stream: false`; this is **not
 token streaming**. True token streaming remains a required future milestone.
 HTTP chat requires both supported Azure configuration and Tavily credentials,
-checked locally before any model call. Memory, temporal recall and quotation
-verification remain outstanding. Citation-ID checks do not establish factual
+checked locally before any model call. Memory, temporal recall and constrained
+quotation checks are described below; general factual verification remains
+outstanding. Citation-ID checks do not establish factual
 verification. Live model compatibility, quota and measured latency are unverified.
 The architecture and remaining acceptance requirements below remain the target.
 
@@ -28,6 +29,12 @@ interim SSE contract or establish quotation/factual verification.
 - **Memory and time:** Persist original messages, IDs and UTC timestamps in per-conversation JSON. Merge request-seeded history with disk history by ID (fallback: hash of role/timestamp/content); server copy wins conflicts. Inject all history while it fits, otherwise anchor relevant dates/keywords. Use `chrono-node` and an IANA timezone for relative dates. Atomic rename plus per-conversation write queues prevent partial or lost writes **within one process**.
 - **Speed and failure:** One server serves the plain HTML/CSS/JS UI and streams SSE progress and answer text. Overall deadline: **25 s**; stop launching searches around **15 s** to reserve synthesis time. Timeouts, abort-on-disconnect, and partial-evidence responses prevent a slow or failed search from becoming an invented answer.
 - **Evidence:** Each result supplies ID, title, URL, extracted text, retrieval time, and optional publication/effective dates (never invented). Link only known `[S#]` citations. For **Confirmed change**, require a short cited quotation and check it after streaming against the *exact text shown to the model*, allowing Unicode/whitespace/typographic normalization; visibly flag mismatches. A matching quote does **not** prove the entire claim. Retrieval date is not change date.
+
+**Constrained verification stage:** [verification.md](docs/verification.md) implements
+source-quotation matching and four deterministic verdicts for explicitly labeled,
+comparable evidence records. General prose fact extraction, broad live comparison
+quality and full claim verification remain unverified. Unsupported evidence stays
+Cannot verify. Existing SSE payloads and execution budgets remain unchanged.
 
 ## Change-verification contract
 
