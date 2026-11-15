@@ -72,10 +72,18 @@ offsets; optional evidence dates are valid ISO dates or timestamps. Missing date
 stay absent. No effective date is inferred. Raw source text stays in the core's
 registry, exactly as truncated for model input; it is not duplicated in the browser.
 
-Citation markers `[S1]`, etc. must resolve within this answer's source registry.
-Only those markers become links. **Citation ID checks do not verify quotations
+Citation markers `[S1]`, etc., including bracket-escaped forms `\[S1\]`,
+`\[S1]` and `[S1\]`, must resolve within this answer's source registry.
+Core, result-schema and browser validation apply the same marker grammar, even
+inside literal code spans. Unknown escaped IDs fail as `INVALID_CITATION` in the
+core; this tightens validation without changing event shapes or the version.
+Registered markers outside code spans become links. **Citation ID checks do not verify quotations
 or factual claims.** Retrieved text and history remain untrusted data. The UI uses
-text nodes and explicit links, never raw HTML or a Markdown renderer. Historical
+text nodes and explicit links, never raw HTML or a Markdown library. Its small
+inline formatter protects same-line matching backtick runs first and preserves
+their contents exactly. Paired standalone `**`/`__` delimiters, including paired
+escaped bold delimiters, render as bold. Isolated escapes remain literal; there
+is no general Markdown, block-code or mathematical typesetting implementation. Historical
 assistant text is context, not independently established evidence of a baseline.
 
 ## Framing, limits and browser acceptance

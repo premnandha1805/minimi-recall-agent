@@ -552,7 +552,8 @@ export function validChatEvent(event, v) {
             ('published_at' in s && !isoDate(s.published_at, true)) || ('effective_at' in s && !isoDate(s.effective_at, true))) return false;
         ids.add(s.id);
       }
-      return [...v.message.content.matchAll(/\[(S\d+)\]/g)].every((m) => ids.has(m[1]));
+      // Same ordinary/bracket-escaped marker grammar as contracts.citationIds.
+      return [...v.message.content.matchAll(/\\?\[(S\d+)\\?\]/g)].every((m) => ids.has(m[1]));
     }
     default: return false;
   }

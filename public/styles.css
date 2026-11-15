@@ -1505,4 +1505,17 @@ textarea:focus-visible,
 .answer-sources summary { cursor: pointer; }
 .source-entry { margin-top: .75rem; }
 .source-entry p { margin: .25rem 0; }
+.answer-bold, .assistant-answer-card strong { font-weight: 600; color: var(--text-primary); }
+.source-list {
+  max-height: 280px;
+  overflow-y: auto;
+  margin-top: 0.5rem;
+  padding-right: 6px;
+  overscroll-behavior: contain;
+}
+.sources-disclaimer {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0.25rem 0 0.5rem;
+}
 .research-limitation { padding: .75rem; border-left: 3px solid #b7791f; }

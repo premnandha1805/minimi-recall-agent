@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ChatRequestSchema, type ChatRequest } from './contracts.js';
+import { ChatRequestSchema, citationIds, type ChatRequest } from './contracts.js';
 import { createDeadlineScope, ExecutionTimeoutError, runWithSignal } from './execution.js';
 import { contextFits, ModelResponseSchema, type ModelMessage, type ModelProvider, type ModelResponse } from './model.js';
 import { AGENT_SYSTEM_PROMPT } from './prompts.js';
@@ -138,7 +138,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
         if (response.finishReason !== 'stop') return reject('invalid_response', 'finish_tool_mismatch');
         if (!response.text.trim()) return reject('empty_output', 'empty_text');
         const knownIds = new Set(search.sources.map((source) => source.id));
-        if ([...response.text.matchAll(/\[(S\d+)\]/g)].some((match) => !knownIds.has(match[1]))) return finish('invalid_citation');
+        if (citationIds(response.text).some((id) => !knownIds.has(id))) return finish('invalid_citation');
         return finish('answer', response.text);
       }
       if (!tools.length) return finish('round_limit');

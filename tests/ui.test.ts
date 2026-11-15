@@ -1428,4 +1428,240 @@ describe('Recall Agent Chat UI (public/index.html + app.js + api.js)', () => {
     expect(scrollIntoViewSpy).not.toHaveBeenCalled();
     expect(app.isScrolledToBottom?.()).toBe(true);
   });
+
+  it('31. handles initial short conversation with auto-scroll and clean answer presentation', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (input === '/health') return new Response('{"status":"ok"}', { status: 200 });
+      const body = JSON.parse(String(init?.body));
+      return new Response(
+        streamText({
+          ...chatResult,
+          message: { id: 'msg_short', role: 'assistant', content: 'Short answer.', timestamp: '2026-11-14T00:00:00.000Z' },
+        }).replace(chatMeta.conversationId, body.conversationId),
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      );
+    });
+
+    const app = await mountApp(fetchMock);
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+
+    chatInput.value = 'Short question';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+
+    const welcomeView = document.getElementById('welcome-view') as HTMLElement;
+    const threadView = document.getElementById('thread-view') as HTMLElement;
+    expect(welcomeView.hidden).toBe(true);
+    expect(threadView.hidden).toBe(false);
+
+    const assistantCard = document.querySelector('.assistant-answer-card');
+    expect(assistantCard?.textContent).toContain('Short answer.');
+    expect(app.isScrolledToBottom?.()).toBe(true);
+  });
+
+  it('32. handles long answers with sticky scrolling and respects user reading from top', async () => {
+    const longContent = Array.from({ length: 8 }, (_, i) => `Paragraph ${i + 1}: detailed evidence and findings.`).join('\n\n');
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (input === '/health') return new Response('{"status":"ok"}', { status: 200 });
+      const body = JSON.parse(String(init?.body));
+      return new Response(
+        streamText({
+          ...chatResult,
+          message: { id: 'msg_long', role: 'assistant', content: longContent, timestamp: '2026-11-14T00:00:00.000Z' },
+        }).replace(chatMeta.conversationId, body.conversationId),
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      );
+    });
+
+    const app = await mountApp(fetchMock);
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+
+    chatInput.value = 'Give me a long answer';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+
+    expect(app.isScrolledToBottom?.()).toBe(true);
+
+    // Simulate reading from top (user scrolls up)
+    Object.defineProperty(document.documentElement, 'scrollHeight', { value: 3000, configurable: true });
+    Object.defineProperty(document.documentElement, 'clientHeight', { value: 600, configurable: true });
+    document.documentElement.scrollTop = 150;
+    document.dispatchEvent(new Event('scroll'));
+
+    expect(app.isScrolledToBottom?.()).toBe(false);
+    expect(document.documentElement.scrollTop).toBe(150);
+
+    // Unforced scrollToBottom does NOT jump user away from reading position
+    app.scrollToBottom?.();
+    expect(document.documentElement.scrollTop).toBe(150);
+    expect(app.isScrolledToBottom?.()).toBe(false);
+  });
+
+  it('33. dynamically adjusts canvas padding-bottom for fixed composer clearance', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (input === '/health') return new Response('{"status":"ok"}', { status: 200 });
+      return new Response(streamText(), { headers: { 'Content-Type': 'text/event-stream' } });
+    });
+
+    await mountApp(fetchMock);
+    const mainCanvas = document.getElementById('main-canvas') as HTMLElement;
+    const composerDock = document.querySelector('.composer-dock') as HTMLElement;
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+
+    expect(mainCanvas.style.paddingBottom).toBe('164px');
+
+    // Simulate composer expanding in height (e.g. multiline prompt)
+    Object.defineProperty(composerDock, 'offsetHeight', { value: 210, configurable: true });
+    chatInput.value = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    // Padding increases dynamically to 210 + 24 = 234px
+    expect(parseInt(mainCanvas.style.paddingBottom, 10)).toBeGreaterThanOrEqual(234);
+  });
+
+  it('34. contains long source lists in a bounded scrollable panel and keeps view anchored on toggle', async () => {
+    const multiSources = Array.from({ length: 6 }, (_, i) => ({
+      id: `S${i + 1}`,
+      query: `CRM pricing query ${i + 1}`,
+      title: `Source Title ${i + 1}`,
+      url: `https://example.com/source-${i + 1}`,
+      retrieved_at: '2026-11-14T00:00:00Z',
+    }));
+
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (input === '/health') return new Response('{"status":"ok"}', { status: 200 });
+      const body = JSON.parse(String(init?.body));
+      return new Response(
+        streamText({
+          ...chatResult,
+          message: { id: 'msg_src', role: 'assistant', content: 'Verified [S1] and [S2].', timestamp: '2026-11-14T00:00:00.000Z' },
+          sources: multiSources,
+        }).replace(chatMeta.conversationId, body.conversationId),
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      );
+    });
+
+    const app = await mountApp(fetchMock);
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+
+    chatInput.value = 'Show many sources';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+
+    const disclosure = document.querySelector('details.answer-sources') as HTMLDetailsElement;
+    expect(disclosure).not.toBeNull();
+
+    const sourceList = disclosure.querySelector('.source-list') as HTMLElement;
+    expect(sourceList).not.toBeNull();
+    expect(sourceList.querySelectorAll('.source-entry')).toHaveLength(6);
+
+    const disclaimer = disclosure.querySelector('.sources-disclaimer') as HTMLElement;
+    expect(disclaimer.textContent).toContain('Citation IDs checked only. Quotations and factual claims have not been verified.');
+
+    // Toggle details open when near bottom
+    disclosure.open = true;
+    disclosure.dispatchEvent(new Event('toggle'));
+
+    expect(app.isScrolledToBottom?.()).toBe(true);
+  });
+
+  it('35. safely formats markdown bold, inline code, escaped markdown and citation brackets without HTML injection or indiscriminate backslash removal', async () => {
+    const trickyContent =
+      '**Confirmed change**: Pricing increased to $20/mo [S1].\n' +
+      '\\*\\*No confirmed change\\*\\* for tool 2 \\[S2\\].\n' +
+      'File path C:\\Users\\test\\config.json with `npm run test` command.\n' +
+      '<script>alert("xss")</script><img src="x" onerror="alert(1)">';
+
+    const testSources = [
+      { id: 'S1', query: 'q1', title: 'Source One', url: 'https://example.com/one', retrieved_at: '2026-11-14T00:00:00Z' },
+      { id: 'S2', query: 'q2', title: 'Source Two', url: 'https://example.com/two', retrieved_at: '2026-11-14T00:00:00Z' },
+    ];
+
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (input === '/health') return new Response('{"status":"ok"}', { status: 200 });
+      const body = JSON.parse(String(init?.body));
+      return new Response(
+        streamText({
+          ...chatResult,
+          message: { id: 'msg_md', role: 'assistant', content: trickyContent, timestamp: '2026-11-14T00:00:00.000Z' },
+          sources: testSources,
+        }).replace(chatMeta.conversationId, body.conversationId),
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      );
+    });
+
+    await mountApp(fetchMock);
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+
+    chatInput.value = 'Markdown formatting test';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+
+    const answerCard = document.querySelector('.assistant-answer-card') as HTMLElement;
+    expect(answerCard).not.toBeNull();
+
+    // Bold elements are created
+    const bolds = answerCard.querySelectorAll('strong.answer-bold');
+    expect(bolds.length).toBeGreaterThanOrEqual(2);
+    expect(Array.from(bolds).map((b) => b.textContent)).toContain('Confirmed change');
+    expect(Array.from(bolds).map((b) => b.textContent)).toContain('No confirmed change');
+
+    // Inline code element
+    const code = answerCard.querySelector('code.code-inline') as HTMLElement;
+    expect(code).not.toBeNull();
+    expect(code.textContent).toBe('npm run test');
+
+    // Citation links
+    const links = answerCard.querySelectorAll('a.citation-link') as NodeListOf<HTMLAnchorElement>;
+    expect(links).toHaveLength(2);
+    expect(links[0].textContent).toBe('[S1]');
+    expect(links[0].href).toBe('https://example.com/one');
+    expect(links[0].target).toBe('_blank');
+    expect(links[0].rel).toBe('noopener noreferrer');
+    expect(links[1].textContent).toBe('[S2]');
+    expect(links[1].href).toBe('https://example.com/two');
+
+    // Windows path preserved without backslash destruction
+    expect(answerCard.textContent).toContain('C:\\Users\\test\\config.json');
+
+    // XSS injection prevented: script and img are NOT DOM elements, but safe text
+    expect(answerCard.querySelector('script')).toBeNull();
+    expect(answerCard.querySelector('img')).toBeNull();
+    expect(answerCard.textContent).toContain('<script>alert("xss")</script>');
+  });
+
+  it('36. handles mobile viewport resizing and maintains sticky scrolling', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (input === '/health') return new Response('{"status":"ok"}', { status: 200 });
+      const body = JSON.parse(String(init?.body));
+      return new Response(streamText().replace(chatMeta.conversationId, body.conversationId), {
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    });
+
+    const app = await mountApp(fetchMock);
+    const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const form = document.getElementById('composer-form') as HTMLFormElement;
+
+    // Simulate mobile viewport
+    Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: 667, configurable: true });
+    window.dispatchEvent(new Event('resize'));
+
+    chatInput.value = 'Mobile test message';
+    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+
+    expect(app.isScrolledToBottom?.()).toBe(true);
+    expect(document.querySelector('.assistant-answer-card')).not.toBeNull();
+  });
 });

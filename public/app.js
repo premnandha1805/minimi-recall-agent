@@ -231,6 +231,8 @@ export function createChatApp(options = {}) {
   const composerErrorEl = /** @type {HTMLElement | null} */ (doc.getElementById('composer-error'));
   const charCounter = /** @type {HTMLElement | null} */ (doc.getElementById('char-counter'));
   const sendButton = /** @type {HTMLButtonElement | null} */ (doc.getElementById('send-button'));
+  const mainCanvasEl = /** @type {HTMLElement | null} */ (doc.getElementById('main-canvas'));
+  const composerDockEl = /** @type {HTMLElement | null} */ (doc.querySelector('.composer-dock'));
 
   if (
     !appShell ||
@@ -265,6 +267,8 @@ export function createChatApp(options = {}) {
   let nextRequestToken = 0;
   /** @type {Set<string>} */
   const expandedTelemetryIds = new Set();
+  /** @type {Map<string, { open: boolean, scrollTop: number }>} */
+  const sourcePanelState = new Map();
   /** @type {HTMLElement | null} */
   let drawerReturnFocusEl = null;
   let isUserNearBottom = true;
@@ -336,6 +340,17 @@ export function createChatApp(options = {}) {
       container.scrollTop = container.scrollHeight;
     }
     isUserNearBottom = true;
+  }
+
+  /**
+   * Synchronizes the bottom padding of the conversation canvas with the height
+   * of the floating composer dock so the latest message is never obscured.
+   */
+  function syncComposerClearance() {
+    if (!mainCanvasEl) return;
+    const dockHeight = composerDockEl ? composerDockEl.offsetHeight : 0;
+    const padding = Math.max(164, dockHeight + 24);
+    mainCanvasEl.style.paddingBottom = `${padding}px`;
   }
 
   /** @param {string} message */
@@ -509,9 +524,13 @@ export function createChatApp(options = {}) {
   }
 
   function handleViewportChange() {
+    syncComposerClearance();
     const compactNow = isCompactViewport();
     if (compactNow === lastCompactViewport) {
       syncSidebarAccessibility();
+      if (isUserNearBottom) {
+        scrollToBottom();
+      }
       return;
     }
     lastCompactViewport = compactNow;
@@ -530,6 +549,10 @@ export function createChatApp(options = {}) {
     chatInput.style.height = 'auto';
     const nextHeight = Math.min(Math.max(chatInput.scrollHeight, 44), 180);
     chatInput.style.height = `${nextHeight}px`;
+    syncComposerClearance();
+    if (isUserNearBottom) {
+      scrollToBottom();
+    }
   }
 
   function syncComposerControls() {
@@ -588,7 +611,7 @@ export function createChatApp(options = {}) {
       button.addEventListener('click', () => {
         if (item.id === activeSession.id) {
           closeMobileDrawer({ restoreFocus: false, focusTarget: chatInput });
-          chatInput?.focus();
+          chatInput?.focus({ preventScroll: true });
           return;
         }
         abortActiveRequest('navigation');
@@ -598,7 +621,7 @@ export function createChatApp(options = {}) {
         isUserNearBottom = true;
         renderWorkspace();
         scrollToBottom({ force: true });
-        chatInput?.focus();
+        chatInput?.focus({ preventScroll: true });
         announce(`Switched to session ${item.title}`);
       });
       sessionListEl.appendChild(button);
@@ -853,6 +876,80 @@ export function createChatApp(options = {}) {
   }
 
   /**
+   * Safely formats assistant answer text with inline bold, inline code, and clickable citations.
+   * Never injects raw HTML; all text is placed in DOM text nodes.
+   * Code delimiters are matching backtick runs on one line; contents stay exact.
+   * Only paired standalone bold delimiters (including \*\* and \_\_) are interpreted.
+   * Isolated escapes/backslashes remain literal. Bracket-escaped citations use the
+   * same grammar as server/browser validation. This is deliberately inline-only.
+   *
+   * @param {HTMLElement} container
+   * @param {string} rawText
+   * @param {Map<string, import('../src/contracts.js').ChatResult['sources'][number]>} sources
+   * @param {boolean} [allowBold]
+   */
+  function renderFormattedContent(container, rawText, sources, allowBold = true) {
+    /** @param {number} start */
+    const codeAt = (start) => {
+      if (rawText[start] !== '`') return null;
+      let width = 1;
+      while (rawText[start + width] === '`') width++;
+      const delimiter = '`'.repeat(width);
+      let end = rawText.indexOf(delimiter, start + width);
+      while (end >= 0) {
+        if (rawText[end - 1] !== '`' && rawText[end + width] !== '`') {
+          const content = rawText.slice(start + width, end);
+          if (content.includes('\n') || content.includes('\r')) return null;
+          return { content, end: end + width };
+        }
+        end = rawText.indexOf(delimiter, end + width);
+      }
+      return null;
+    };
+    let plain = '';
+    const flush = () => { if (plain) container.appendChild(doc.createTextNode(plain)); plain = ''; };
+    for (let i = 0; i < rawText.length;) {
+      // Protect code before interpreting escapes, emphasis or citation markers.
+      const code = codeAt(i);
+      if (code) { flush(); container.appendChild(el(doc, 'code', 'code-inline', code.content)); i = code.end; continue; }
+      const citation = rawText.slice(i).match(/^\\?\[(S\d+)\\?\]/);
+      if (citation) {
+        flush();
+        const source = sources.get(citation[1]);
+        if (source) {
+          const link = el(doc, 'a', 'citation-link', `[${citation[1]}]`);
+          link.href = source.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.title = source.title;
+          container.appendChild(link);
+        } else container.appendChild(doc.createTextNode(citation[0]));
+        i += citation[0].length; continue;
+      }
+      const delimiter = allowBold && (i === 0 || !/[\p{L}\p{N}\\/:_]/u.test(rawText[i - 1])) ?
+        ['**', '__', '\\*\\*', '\\_\\_'].find((value) => rawText.startsWith(value, i)) : undefined;
+      if (delimiter) {
+        const start = i + delimiter.length;
+        let end = start;
+        while (end < rawText.length && rawText[end] !== '\n' && rawText[end] !== '\r') {
+          const protectedCode = codeAt(end);
+          if (protectedCode) { end = protectedCode.end; continue; }
+          if (rawText.startsWith(delimiter, end)) break;
+          end++;
+        }
+        const inner = rawText.slice(start, end);
+        if (rawText.startsWith(delimiter, end) && inner.trim() && inner === inner.trim() &&
+            !/[\r\n]/.test(inner) && !/[\p{L}\p{N}_]/u.test(rawText[end + delimiter.length] ?? '')) {
+          flush(); const strong = el(doc, 'strong', 'answer-bold');
+          renderFormattedContent(strong, inner, sources, false); container.appendChild(strong);
+          i = end + delimiter.length; continue;
+        }
+      }
+      // Preserve an unhandled escape as a pair, so its backtick cannot open code.
+      const width = rawText[i] === '\\' && i + 1 < rawText.length ? 2 : 1;
+      plain += rawText.slice(i, i + width); i += width;
+    }
+    flush();
+  }
+
+  /**
    * @param {ThreadAssistantEntry} entry
    * @returns {HTMLElement}
    */
@@ -870,18 +967,7 @@ export function createChatApp(options = {}) {
     answerCard.appendChild(el(doc, 'div', 'notice-accent-bar is-info'));
     const content = el(doc, 'div', 'assistant-answer-card');
     const sources = new Map((entry.result?.sources ?? []).map((s) => [s.id, s]));
-    let cursor = 0;
-    for (const match of entry.text.matchAll(/\[(S\d+)\]/g)) {
-      content.appendChild(doc.createTextNode(entry.text.slice(cursor, match.index)));
-      const source = sources.get(match[1]);
-      if (source) {
-        const link = el(doc, 'a', 'citation-link', match[0]);
-        link.href = source.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
-        link.title = source.title; content.appendChild(link);
-      } else content.appendChild(doc.createTextNode(match[0]));
-      cursor = match.index + match[0].length;
-    }
-    content.appendChild(doc.createTextNode(entry.text.slice(cursor)));
+    renderFormattedContent(content, entry.text, sources);
     answerCard.appendChild(content);
     if (entry.result?.coverage === 'partial') {
       const labels = {
@@ -894,8 +980,12 @@ export function createChatApp(options = {}) {
     }
     if (entry.result) {
       const disclosure = el(doc, 'details', 'answer-sources');
+      disclosure.dataset.entryId = entry.id;
+      const panelState = sourcePanelState.get(entry.id);
+      disclosure.open = panelState?.open ?? false;
       disclosure.appendChild(el(doc, 'summary', '', `Sources (${sources.size})`));
-      disclosure.appendChild(el(doc, 'p', '', 'Citation IDs checked only. Quotations and factual claims have not been verified.'));
+      disclosure.appendChild(el(doc, 'p', 'sources-disclaimer', 'Citation IDs checked only. Quotations and factual claims have not been verified.'));
+      const list = el(doc, 'div', 'source-list');
       for (const source of sources.values()) {
         const item = el(doc, 'div', 'source-entry');
         const link = el(doc, 'a', '', `[${source.id}] ${source.title}`);
@@ -906,8 +996,18 @@ export function createChatApp(options = {}) {
         item.appendChild(el(doc, 'p', '', `Retrieved: ${source.retrieved_at}`));
         if (source.published_at) item.appendChild(el(doc, 'p', '', `Published: ${source.published_at}`));
         if (source.effective_at) item.appendChild(el(doc, 'p', '', `Effective: ${source.effective_at}`));
-        disclosure.appendChild(item);
+        list.appendChild(item);
       }
+      disclosure.appendChild(list);
+      let lastOpen = disclosure.open;
+      disclosure.addEventListener('toggle', () => {
+        if (!disclosure.isConnected || disclosure.open === lastOpen) return;
+        lastOpen = disclosure.open;
+        sourcePanelState.set(entry.id, { open: disclosure.open, scrollTop: list.scrollTop });
+        // Expansion is reader navigation, not newly generated content. Do not move
+        // the outer viewport; resume following only if it is actually near bottom.
+        isUserNearBottom = isUserNearBottom && isNearBottom();
+      });
       answerCard.appendChild(disclosure);
     }
     article.appendChild(answerCard);
@@ -918,6 +1018,15 @@ export function createChatApp(options = {}) {
   function renderWorkspace() {
     if (!welcomeView || !threadView || !messageListEl) {
       return;
+    }
+    const scrollContainer = getScrollContainer();
+    const rootScroll = scrollContainer === doc.documentElement || scrollContainer === doc.body || scrollContainer === doc.scrollingElement;
+    const readerTop = rootScroll ? (win?.scrollY ?? scrollContainer.scrollTop) : scrollContainer.scrollTop;
+    for (const panel of messageListEl.querySelectorAll('details.answer-sources')) {
+      const disclosure = /** @type {HTMLDetailsElement} */ (panel);
+      const list = disclosure.querySelector('.source-list');
+      if (disclosure.dataset.entryId) sourcePanelState.set(disclosure.dataset.entryId,
+        { open: disclosure.open, scrollTop: list?.scrollTop ?? 0 });
     }
     const hasEntries = activeSession.entries.length > 0;
     welcomeView.hidden = hasEntries;
@@ -950,11 +1059,23 @@ export function createChatApp(options = {}) {
         messageListEl.appendChild(renderAssistantTurn(entry));
       }
     }
+    // Restore only after attachment/open-state layout: real browsers clamp a
+    // detached list's scrollTop to zero, unlike DOM-only test environments.
+    for (const panel of messageListEl.querySelectorAll('details.answer-sources')) {
+      const disclosure = /** @type {HTMLDetailsElement} */ (panel);
+      const list = disclosure.querySelector('.source-list');
+      const state = sourcePanelState.get(disclosure.dataset.entryId ?? '');
+      if (list && state?.open) list.scrollTop = state.scrollTop;
+    }
 
     renderSessionList();
     syncComposerControls();
+    syncComposerClearance();
 
-    scrollToBottom();
+    if (isUserNearBottom) scrollToBottom();
+    else if (rootScroll) {
+      win?.scrollTo(0, readerTop); scrollContainer.scrollTop = readerTop;
+    } else scrollContainer.scrollTop = readerTop;
   }
 
   /**
@@ -1253,7 +1374,7 @@ export function createChatApp(options = {}) {
     if (isCurrentActiveSession) {
       renderWorkspace();
       if (shouldAnnounceAndFocus) {
-        chatInput?.focus();
+        chatInput?.focus({ preventScroll: true });
       }
     } else {
       syncComposerControls();
@@ -1331,7 +1452,7 @@ export function createChatApp(options = {}) {
       const errMsg = `Request payload is too large (${baseEnvelopeCheck.serializedBytes.toLocaleString('en-US')} UTF-8 bytes including metadata; limit is ${baseEnvelopeCheck.maxBodyBytes.toLocaleString('en-US')} bytes). Shorten your message and try again.`;
       showComposerError(errMsg);
       announce(errMsg);
-      chatInput.focus();
+      chatInput.focus({ preventScroll: true });
       return;
     }
 
@@ -1388,7 +1509,7 @@ export function createChatApp(options = {}) {
     isUserNearBottom = true;
     renderWorkspace();
     scrollToBottom({ force: true });
-    chatInput?.focus();
+    chatInput?.focus({ preventScroll: true });
     announce('Started a new conversation.');
   }
 
@@ -1458,7 +1579,7 @@ export function createChatApp(options = {}) {
       if (interactive && interactive !== composerForm) {
         return;
       }
-      chatInput.focus();
+      chatInput.focus({ preventScroll: true });
       const len = chatInput.value.length;
       if (typeof chatInput.setSelectionRange === 'function') {
         chatInput.setSelectionRange(len, len);
@@ -1505,7 +1626,7 @@ export function createChatApp(options = {}) {
         showComposerError('');
         syncTextareaHeight();
         syncComposerControls();
-        chatInput.focus();
+        chatInput.focus({ preventScroll: true });
         announce('Populated suggested prompt in message input.');
       },
       { signal: listenerSignal },
@@ -1543,7 +1664,7 @@ export function createChatApp(options = {}) {
         closeApiInfoBtn?.focus();
         void refreshHealth();
       } else {
-        chatInput?.focus();
+        chatInput?.focus({ preventScroll: true });
       }
     },
     { signal: listenerSignal },
@@ -1560,7 +1681,7 @@ export function createChatApp(options = {}) {
       if (isSidebarVisible()) {
         aboutStatusBtn.focus();
       } else {
-        chatInput?.focus();
+        chatInput?.focus({ preventScroll: true });
       }
     },
     { signal: listenerSignal },

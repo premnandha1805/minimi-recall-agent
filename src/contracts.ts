@@ -70,6 +70,12 @@ export const ChatRequestSchema = z.strictObject({
 export type ChatHistoryMessage = z.infer<typeof ChatHistoryMessageSchema>;
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 
+/** Ordinary or bracket-escaped source markers. Keep browser validation in parity.
+ * Code spans are still checked: literal formatting never authorizes unknown IDs. */
+export function citationIds(text: string): string[] {
+  return [...text.matchAll(/\\?\[(S\d+)\\?\]/g)].map((match) => match[1]);
+}
+
 export interface HealthResponse {
   status: 'ok';
   service: string;
@@ -126,7 +132,7 @@ export const ChatResultSchema = z.strictObject({
   const ids = new Set(value.sources.map((s) => s.id));
   if (ids.size !== value.sources.length || new Set(value.issues).size !== value.issues.length ||
       (value.coverage === 'complete') !== (value.issues.length === 0) ||
-      [...value.message.content.matchAll(/\[(S\d+)\]/g)].some((m) => !ids.has(m[1]))) {
+      citationIds(value.message.content).some((id) => !ids.has(id))) {
     ctx.addIssue({ code: 'custom', message: 'Invalid evidence registry or coverage' });
   }
 });
