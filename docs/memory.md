@@ -304,6 +304,16 @@ guessing which competing event changed. Relative or implicit calendar paraphrase
 outside the supported date forms still rely on model interpretation; this is not
 general claim verification. Stored originals, receipts and search budgets are unchanged.
 
+Mixed answers apply the same check to explicitly personal event sentences while
+retaining separate public research sentences and their current citations. An
+unsupported sentence is replaced with labeled original records, including any
+corrections or cancellations. Combined personal/public sentences may be withheld
+as a whole; implicit ownership or unsupported date phrasing remains a limitation.
+This adds no model calls, search calls or prompt context.
+If complete fallback originals exceed the existing 16,000-character answer
+contract, return an explicit narrowing request before persistence, never truncated
+evidence or an oversized SSE result. Stored originals remain available.
+
 This lexical method can miss
 paraphrases, inflections or implicit references; absence is not proof that a
 discussion never occurred. Terse personal facts without first-person wording and

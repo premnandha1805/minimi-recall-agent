@@ -26,6 +26,94 @@ function store(values: Conversation[]) {
 const opts = (query: string) => ({ query, activeConversationId: id(999), currentTurnId: id(998), referenceInstant: '2026-11-17T12:00:00.000Z',
   timezone: 'UTC', signal: new AbortController().signal, startedAt: performance.now(), deadlineMs: 25000 });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+describe('mixed personal event answer grounding', () => {
+  it('returns a usable HTTP limitation when complete fallback originals exceed the answer contract', async () => {
+    const directory = await fs.mkdtemp(join(tmpdir(), 'recall-fallback-limit-'));
+    let db: ConversationStore | undefined; let app: ReturnType<typeof buildServer> | undefined;
+    try {
+      db = await ConversationStore.open({ directory, now: () => new Date('2026-08-01T10:00:00Z') });
+      const original = await db.create('UTC');
+      for (const company of ['Infosys', 'Acme']) await db.addTurn(original.id, {
+        key: company, content: `I have a meeting with ${company} on 23 August. ${'Supporting notes. '.repeat(500)}` });
+      await db.close(); db = undefined;
+      const network = vi.fn<typeof fetch>(async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        const data = JSON.parse(body.messages[1].content).untrustedHistoricalData;
+        expect(data.status).toBe('ambiguous'); expect(data.records).toHaveLength(2);
+        expect(body.tools).toBeUndefined();
+        return json(wire('Your meeting is on 23 August 2027.'));
+      });
+      app = buildServer({ memoryDirectory: directory, config: loadConfig(azureEnv), logger: false, fetchImpl: network });
+      const response = await app.inject({ method: 'POST', url: '/api/chat', payload: { message: 'When is my meeting?' } });
+      const stream = await readChatStream(new Response(response.body));
+      expect(stream.result?.message.content).toMatch(/answer limit.*narrow/i);
+      expect(stream.result?.message.content).not.toContain('2027');
+      expect(network).toHaveBeenCalledTimes(1);
+      const restored = (await app.inject(`/api/conversations/${response.headers['x-conversation-id']}`)).json();
+      expect(restored.turns[0].attempts[0].status).toBe('awaiting_receipt');
+    } finally { await app?.close(); await db?.close(); await fs.rm(directory, { recursive: true, force: true }); }
+  });
+  it.each([
+    'Your Infosys meeting is on 23 August 2027.',
+    'Your Infosys meeting is upcoming; the year was not specified.',
+  ])('rejects unsupported personal claim while retaining researched weather: %s', async (claim) => {
+    const original = conversation(10, 'I have a meeting with Infosys on 23 August.');
+    const query = 'When is my Infosys meeting and what is the current weather?';
+    const memory = await retrieveMemory(store([original]), opts(query));
+    expect(memory.memoryOnly).toBe(false);
+    expect(memory.records[0].user.content).toBe(original.turns[0].user.content);
+    const search = vi.fn(async () => [{ title: 'Weather forecast', url: 'https://example.com/weather',
+      text: 'Weather for 17 November 2026: 24 degrees Celsius.', retrieved_at: '2026-11-17T12:00:00Z' }]);
+    let calls = 0;
+    const response = await runAgent({ message: query }, { memory, search, signal: new AbortController().signal,
+      provider: { contextWindowTokens: 65536, complete: async (request) => {
+        if (++calls === 1) {
+          expect(request.tools.map((tool) => tool.name)).toEqual(['web_search']);
+          return { text: '', finishReason: 'tool_calls', toolCalls: [{ id: 'weather', name: 'web_search', arguments: '{"queries":["current weather"]}' }] };
+        }
+        return { text: `${claim} Weather for 17 November 2026: 24 degrees Celsius [S1].`, finishReason: 'stop', toolCalls: [] };
+      } } });
+    expect(response.reason).toBe('answer');
+    expect(response.answer).not.toContain(claim);
+    expect(response.answer).toContain(original.turns[0].user.content);
+    expect(response.answer).toContain(original.id);
+    expect(response.answer).toContain('Weather for 17 November 2026: 24 degrees Celsius [S1].');
+    expect(response.sources.map((s) => s.id)).toEqual(['S1']);
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(response.stats.modelCalls).toBe(2);
+  });
+  it.each(['Actually, make that 25 August.', 'Please cancel that meeting.'])('preserves update chronology in a mixed answer: %s', async (update) => {
+    const original = conversation(10, 'I have a meeting with Infosys on 23 August.');
+    const next = conversation(20, update, '2026-11-04T10:00:00.000Z').turns[0]; next.ordinal = 1;
+    original.turns.push(next);
+    const query = 'When is my Infosys meeting and search the web for Infosys?';
+    const memory = await retrieveMemory(store([original]), opts(query));
+    expect(memory.records).toHaveLength(2);
+    const search = vi.fn(async () => [{ title: 'Infosys AGM', url: 'https://example.com/agm',
+      text: 'The Infosys AGM is on 10 May 2027.', retrieved_at: '2026-11-17T12:00:00Z' }]);
+    let calls = 0;
+    const response = await runAgent({ message: query }, { memory, search, signal: new AbortController().signal,
+      provider: { contextWindowTokens: 65536, complete: async () => ++calls === 1 ?
+        { text: '', finishReason: 'tool_calls', toolCalls: [{ id: 'public', name: 'web_search', arguments: '{"queries":["Infosys AGM"]}' }] } :
+        { text: 'Your Infosys meeting is on 23 August. The Infosys AGM is on 10 May 2027 [S1].', finishReason: 'stop', toolCalls: [] } } });
+    expect(response.reason).toBe('answer');
+    expect(response.answer).not.toContain('Your Infosys meeting is on 23 August.');
+    expect(response.answer).toContain('earlier dates are historical');
+    expect(response.answer).toContain(`Recorded update: \u201c${update}\u201d`);
+    expect(response.answer).toContain(original.id);
+    expect(response.answer).toContain('The Infosys AGM is on 10 May 2027 [S1].');
+    expect(search).toHaveBeenCalledTimes(1);
+  });
+  it('preserves a supported yearless answer and external date verbatim', async () => {
+    const query = 'When is my Infosys meeting and what is the current weather?';
+    const memory = await retrieveMemory(store([conversation(10, 'I have a meeting with Infosys on 23 August.')]), opts(query));
+    const answer = 'Your Infosys meeting is on 23 August.\n\nI cannot check the weather for 17 November 2026 without a location.';
+    const response = await runAgent({ message: query }, { memory, signal: new AbortController().signal,
+      provider: { contextWindowTokens: 65536, complete: async () => ({ text: answer, finishReason: 'stop', toolCalls: [] }) } });
+    expect(response.answer).toBe(answer);
+    expect(response.stats.modelCalls).toBe(1);
+  });
+});
 describe('deterministic stored retrieval and agent context', () => {
   it('Gate 7C synthesizes after ten large turns and both research rounds', async () => {
     const memory: RetrievedMemory = { reference: { instant: '2026-11-17T12:00:00Z', timezone: 'UTC' }, recall: false, memoryOnly: false,

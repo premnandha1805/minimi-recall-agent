@@ -120,7 +120,7 @@ npx vitest run tests/adversarial-eval.test.ts
 ```
 
 ### Verified Benchmark Metrics
-- **Automated Regression Suite:** **775 tests passed, 1 skipped** across 22 test files.
+- **Automated Regression Suite:** **791 tests passed, 1 skipped** across 23 test files.
 - **Scripted Offline Evaluation (`eval:offline`):**
   - **31 / 31 (100%)** structural and safety assertions passed.
   - **30 / 31 (96.8%)** usefulness assertions passed.

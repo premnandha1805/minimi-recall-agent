@@ -2,7 +2,7 @@ import { isChangeRequest, COMPARISON_INSTRUCTIONS, verifyChangeAnswer, checkSour
 import { memoryData, prepareAgentContext, isMemoryUpdate, type RetrievedMemory } from './context.js';
 import { z } from 'zod';
 import { createTemporalResolver } from './dates.js';
-import { ChatRequestSchema, citationIds, type ChatRequest } from './contracts.js';
+import { ChatRequestSchema, citationIds, MAX_MESSAGE_CHARS, type ChatRequest } from './contracts.js';
 import { createDeadlineScope, ExecutionTimeoutError, runWithSignal } from './execution.js';
 import { contextFits, ModelResponseSchema, type ModelMessage, type ModelProvider, type ModelResponse } from './model.js';
 import { AGENT_SYSTEM_PROMPT } from './prompts.js';
@@ -125,6 +125,25 @@ export function validateAndGroundMemoryAnswer(modelAnswer: string, memory: Retri
 
 export const enforceTemporalSafety = validateAndGroundMemoryAnswer;
 
+/** In mixed answers, public dates must not become evidence for private events.
+ * Check explicitly personal event sentences separately, preserving other research
+ * sentences and their request-local citations. Unclear combined sentences fall
+ * back as a whole rather than editing a date inside a quotation or claim. */
+function groundMixedMemoryAnswer(answer: string, memory: RetrievedMemory): string {
+  let replacementShown = false;
+  const grounded = answer.split(/(?<=[.!?])\s+|\n+/).flatMap((sentence) => {
+    if (!eventWords.test(sentence) || !/\b(?:you|your|yours|my|our)\b/i.test(sentence)) return [sentence];
+    const checked = memory.status === 'not_found' ? 'I did not find a suitable personal event record in the stored conversations.' :
+      memory.status === 'limited' || memory.status === 'unsupported_date' ? 'The stored personal event history is limited or ambiguous; no current schedule can be confirmed.' :
+        validateAndGroundMemoryAnswer(sentence, memory);
+    if (checked === sentence) return [sentence];
+    if (replacementShown) return [];
+    replacementShown = true;
+    return [checked];
+  }).join('\n\n');
+  return replacementShown ? grounded : answer;
+}
+
 export const AGENT_LIMITS = Object.freeze({ deadlineMs: 25_000, modelTimeoutMs: 10_000,
   modelCalls: 3, maxOutputTokens: 2048, totalOutputTokens: 6144 });
 const RunOptionsSchema = z.strictObject({
@@ -199,7 +218,10 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
     result.reason = reason;
     result.status = reason === 'cancelled' ? 'cancelled' :
       reason === 'answer' ? (issues.size ? 'partial' : 'completed') : 'failed';
-    if (answer !== undefined) result.answer = answer;
+    // Deterministic originals and appended notices can exceed the model's text
+    // limit. Enforce the public answer contract without truncating evidence.
+    if (answer !== undefined) result.answer = answer.length > MAX_MESSAGE_CHARS ?
+      'The complete answer exceeds the answer limit. Please narrow the date or topic; no original record or quotation has been truncated.' : answer;
     return result;
   };
   const reject = (reason: AgentStopReason, category: ValidationCategory): AgentResult => {
@@ -285,6 +307,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
         else if (/(?<!no )\bconfirmed change\b/i.test(answer)) answer = 'Cannot verify: a change verdict was not established by deterministic evidence comparison.';
         if (!checkSourceQuotations(answer, search.sources)) answer = 'Cannot verify: quotation warning: a cited quotation did not match the exact available source text. No unsupported quotation or change claim is accepted.';
         if (options.memory?.memoryOnly) answer = validateAndGroundMemoryAnswer(answer, options.memory, parsed.data.message);
+        else if (options.memory?.recall && !changeRequest) answer = groundMixedMemoryAnswer(answer, options.memory);
         if (performance.now() - startedAt >= limits.data.deadlineMs) return finish('deadline');
         deadline.signal.throwIfAborted();
         if (citationIds(answer).some((id) => !knownIds.has(id))) return finish('invalid_citation');
