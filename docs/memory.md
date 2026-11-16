@@ -244,8 +244,14 @@ Client-seeded records retain their original role/text, separate IDs and unverifi
 provenance. No histories are written or synthesized by retrieval.
 
 Supported recall patterns include "What did I/we ...", "Which ... did we ...",
-"Summarize our earlier/previous ...", "recall" and "remember". Temporal phrases
-are extracted conservatively and passed to dates.ts. Bare weekdays mean the most
+"Summarize our earlier/previous ...", "recall" and "remember", plus personal
+questions such as "When is my meeting?", "What is my project called?", "Where do
+I work?" and "What coffee do I prefer?". Topics and company names are not
+allowlisted. Original admitted user messages are stored regardless of topic or
+assistant receipt; recall recognition controls retrieval, not persistence.
+Temporal discussion locators are passed conservatively to dates.ts. Dates in
+personal questions describe events, not conversation timestamps, so they do not
+filter out statements recorded on an earlier day. Bare discussion weekdays mean the most
 recent occurrence on/before the reference local day; "last weekday" is strictly
 before it. Last week is the previous Monday-through-Sunday week. Multiple hints,
 numeric date ambiguity and unsupported expressions require clarification. External
@@ -271,9 +277,39 @@ break ties by conversation ID, ordinal and turn ID. A directly adjacent followup
 starting with a supported reference word may be included as separately labeled
 context. Contiguous related server turns on one local day in one conversation
 form one discussion; gaps, different days, competing conversations and separate
-seed records retain ambiguity. This lexical method can miss
+seed records retain ambiguity. Personal facts match original user text, not
+assistant claims; imported assistant seeds and question-leading messages cannot
+establish private facts. This prevents repeated recall questions from creating
+additional event matches; their originals remain available for discussion recall.
+First-person statements and explicit event updates are eligible for personal
+recall. Consecutive private records do not automatically become one event.
+Directly adjacent supported reschedule/cancellation references retain the original
+preceding event and update chain; named updates also match across conversations.
+Personal records are presented in timestamp order with original conversation IDs.
+Ambiguity remains explicit; synthesis may apply a later update only when the
+original statements clearly link it to the same event. Yearless dates stay
+yearless and cannot alone establish that an event is upcoming.
+
+Pure recall answers undergo a conservative calendar check: each supported English
+or ISO date must match the day, month and explicit year in an individual original
+user clause, with a matching topic/entity anchor. Other clauses, assistant claims,
+source excerpts and quantities such as 2000 rupees cannot supply an event year.
+Affirmative upcoming claims require a uniquely associated explicitly dated event
+after the captured request reference. Adding an uncertainty disclaimer does not
+authorize a future-status assertion. Unclear associations return quoted originals
+with conversation/turn provenance and client-seed labels, rather than modifying
+the model's words. Histories containing corrections or cancellations always use
+this evidence view: it labels updates and keeps earlier dates historical without
+guessing which competing event changed. Relative or implicit calendar paraphrases
+outside the supported date forms still rely on model interpretation; this is not
+general claim verification. Stored originals, receipts and search budgets are unchanged.
+
+This lexical method can miss
 paraphrases, inflections or implicit references; absence is not proof that a
-discussion never occurred. No measured accuracy improvement is claimed.
+discussion never occurred. Terse personal facts without first-person wording and
+distant pronoun-only corrections can be missed. It does not guarantee arbitrary
+semantic recall or validate model prose as factual. No live accuracy improvement
+is claimed.
 
 Recall selects at most eight whole records with a 32 KiB serialized memory-context
 budget, also checked by the existing conservative contextFits calculation including
@@ -313,10 +349,22 @@ Pure recognized recall disables web_search. Missing records, unsupported date
 references and coverage/context limits produce fixed honest answers without model
 or search calls. Found records use the same bounded agent loop for synthesis.
 Mixed current-information requests retain Tavily through the existing single tool.
+Words such as "now" and "still" alone do not enable public research for a private
+schedule. Public-event questions remain search-enabled. Private schedule changes
+also bypass the public pricing/feature comparison contract.
 Storage failures fail explicitly, never as invented "not found" success. Retrieval
 has a disposable arrival-deadline scope, and elapsed time is rechecked before model
 execution. Limits remain three model calls, two rounds, 5+3 searches and 25 seconds.
 No public response shapes, receipt rules or SSE event framing changed.
+
+The repair extends deterministic retrieval (alternative A). No derived fact store,
+embedding index, cache or per-turn LLM extraction is needed for the reproduced
+cases: the original records already exist and fit the current storage bounds.
+Extraction adds no model calls; found recall uses the existing synthesis call,
+while missing/limited history uses none. Context limits remain unchanged and
+retrieval never injects the full cross-conversation archive. The local directory
+is the single user's scope; conversation IDs and browser storage are not user
+authentication. Larger deployments require a separately designed identity model.
 
 `tests/context.test.ts` uses frozen records plus a restart/HTTP test with mocked
 providers. Live recall quality and latency remain unmeasured; this milestone does

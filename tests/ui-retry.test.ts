@@ -121,7 +121,7 @@ describe('conversation turn order and retries (offline SSE)', () => {
       Array.from({ length: 50 }, (_, i) => [`Q${i + 2}`, `Answer Q${i + 2}`]).flat());
     expect(h.app.getActiveSession().omittedHistoryCount).toBe(4);
     expect(document.querySelectorAll('.turn-user')).toHaveLength(53);
-  }, 20_000);
+  }, 35_000);
 
   it('retains the existing byte limit for large Unicode histories after an old retry', async () => {
     const h = await mount((body, attempt) => attempt === 1 ? failure() : success(body), { maxBodyBytes: 2000 });

@@ -1,6 +1,7 @@
 import { isChangeRequest, COMPARISON_INSTRUCTIONS, verifyChangeAnswer, checkSourceQuotations } from './verification.js';
-import { memoryData, prepareAgentContext, type RetrievedMemory } from './context.js';
+import { memoryData, prepareAgentContext, isMemoryUpdate, type RetrievedMemory } from './context.js';
 import { z } from 'zod';
+import { createTemporalResolver } from './dates.js';
 import { ChatRequestSchema, citationIds, type ChatRequest } from './contracts.js';
 import { createDeadlineScope, ExecutionTimeoutError, runWithSignal } from './execution.js';
 import { contextFits, ModelResponseSchema, type ModelMessage, type ModelProvider, type ModelResponse } from './model.js';
@@ -24,6 +25,105 @@ function excerpt(text: string, query: string, size: number, preserveLineStart = 
   }
   return text.slice(best, best + size);
 }
+
+type MemoryRecord = RetrievedMemory['records'][number];
+interface MemoryDate { day?: number; month?: number; year?: number }
+const calendarMonths = 'January February March April May June July August September October November December'.split(' ');
+const monthNames = calendarMonths.join('|');
+const eventWords = /\b(?:meetings?|appointments?|interviews?|calls?|events?|flights?|conferences?|schedule|calendar|plans?)\b/i;
+// Dates only: a price, identifier or quantity is never evidence for a calendar year.
+function mentionedDates(text: string): MemoryDate[] {
+  const pattern = new RegExp(`\\b(?:(\\d{4})-(\\d{2})-(\\d{2})|(\\d{1,2})(?:st|nd|rd|th)?\\s+(${monthNames})(?:,?\\s+(\\d{4}))?|(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?|(?:in|during|year)\\s+((?:19|20)\\d{2}))\\b`, 'gi');
+  return [...text.matchAll(pattern)].map((m) => {
+    if (m[1]) return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
+    if (m[10]) return { year: Number(m[10]) };
+    return { day: Number(m[4] ?? m[8]), month: calendarMonths.findIndex((v) => v.toLowerCase() === (m[5] ?? m[7]).toLowerCase()) + 1,
+      ...((m[6] ?? m[9]) ? { year: Number(m[6] ?? m[9]) } : {}) };
+  });
+}
+const framingWords = new Set(('i we my our you your have has had with the and for a an on in at to is are was were ' +
+  'also recorded previously said mentioned scheduled upcoming meeting meetings appointment interview call event flight conference schedule calendar ' +
+  'only original statement stored user gives without ' +
+  'date day year time').split(' '));
+function identityWords(text: string): string[] {
+  return [...new Set(text.toLowerCase().match(/[\p{L}]+/gu) ?? [])].filter((t) => t.length > 2 &&
+    !framingWords.has(t) && !calendarMonths.some((m) => m.toLowerCase() === t));
+}
+// Split independent claims, preserving the comma within "August 23, 2027".
+function evidenceClauses(text: string): string[] {
+  return text.split(/[.!?;]\s+|\n+|\s+(?:and|but)\s+|,\s*(?!\d{4}\b)/i);
+}
+function sameDate(a: MemoryDate, b: MemoryDate): boolean {
+  return a.day === b.day && a.month === b.month && a.year === b.year;
+}
+function buildDeterministicMemoryAnswer(memory: RetrievedMemory, records: MemoryRecord[], updates: boolean): string {
+  // Project historical markers exactly as in model context; never mint current citations.
+  const projected = memoryData(memory, records).records;
+  const lines = projected.map((r, i) => {
+    const dates = mentionedDates(r.user.content);
+    const yearless = dates.some((d) => d.year === undefined) || (eventWords.test(r.user.content) && !dates.length);
+    const note = yearless ? (records.length === 1 ? ' (the year was not specified; cannot verify if upcoming)' :
+      ' (year not specified; cannot verify if upcoming)') : '';
+    const label = isMemoryUpdate(r.user.content) ? 'Recorded update' : 'Original statement';
+    const origin = `${r.provenance === 'client_seed' ? 'client_seed, unverified' : 'server_recorded'}; conversation ${r.conversationId}; turn ${r.turnId}`;
+    return `${i + 1}. ${label}: \u201c${r.user.content}\u201d${note} [${origin}]`;
+  });
+  const header = memory.status === 'ambiguous' ? 'Historical matches are ambiguous; a single current event cannot be established.' :
+    updates ? 'Stored statements and updates in recorded order; earlier dates are historical, not a confirmed current schedule.' :
+      'You previously recorded the following original statements:';
+  return `${header}\n${lines.join('\n')}`;
+}
+
+/** Conservative check of calendar claims, not a general factual verifier.
+ * Unclear associations return labeled originals instead of rewriting model prose. */
+export function validateAndGroundMemoryAnswer(modelAnswer: string, memory: RetrievedMemory, _query?: string): string {
+  const records = memory.records.filter((r) => r.user.role !== 'assistant');
+  if (!records.length) return modelAnswer;
+  const updates = records.some((r) => isMemoryUpdate(r.user.content));
+  const fallback = () => buildDeterministicMemoryAnswer(memory, records, updates);
+  // A lexical matcher cannot safely certify which earlier event an update changes.
+  // Present the chronology explicitly rather than accept a stale or arbitrarily chosen date.
+  if (updates) return fallback();
+  const temporal = records.some((r) => eventWords.test(r.user.content) || mentionedDates(r.user.content).length) ||
+    eventWords.test(modelAnswer) || mentionedDates(modelAnswer).length > 0;
+  if (!temporal) return modelAnswer;
+  if (memory.status === 'ambiguous') return fallback();
+
+  const evidence = records.flatMap((r) => evidenceClauses(r.user.content).map((text) => ({
+    text, dates: mentionedDates(text), identity: identityWords(text),
+  }))).filter((e) => e.dates.length);
+  const claims = evidenceClauses(modelAnswer);
+  for (const text of claims) {
+    const dates = mentionedDates(text);
+    const identity = identityWords(text);
+    for (const date of dates) {
+      const candidates = evidence.filter((e) => e.dates.length === 1 && sameDate(e.dates[0], date));
+      // Identity overlap must accompany a matching complete date; a global year
+      // match or a second date elsewhere in the same message cannot authorize it.
+      const supported = candidates.some((e) => identity.some((t) => e.identity.includes(t))) ||
+        (evidence.length === 1 && candidates.length === 1 && !identity.length);
+      if (!supported) return fallback();
+    }
+    // A bare year on an event claim is also uncertain, even if it occurs in a budget.
+    if (eventWords.test(text) && /\b(?:19|20)\d{2}\b/.test(text) && !dates.some((d) => d.year !== undefined)) return fallback();
+
+    const affirmative = text.replace(/\b(?:cannot|can't)\s+(?:verify|confirm|establish|determine)(?:\s+(?:if|whether)(?:\s+it is)?)?\s+upcoming\b/gi, '')
+      .replace(/\b(?:is|are)\s+not\s+upcoming\b/gi, '');
+    if (/\bupcoming\b/i.test(affirmative)) {
+      const candidates = evidence.filter((e) => e.dates.length === 1 && e.dates[0].year !== undefined &&
+        e.dates[0].month !== undefined && e.dates[0].day !== undefined &&
+        (identity.some((t) => e.identity.includes(t)) || evidence.length === 1));
+      if (candidates.length !== 1) return fallback();
+      const d = candidates[0].dates[0];
+      const date = `${d.year}-${String(d.month).padStart(2, '0')}-${String(d.day).padStart(2, '0')}`;
+      const resolved = createTemporalResolver({ referenceInstant: memory.reference.instant, timezone: memory.reference.timezone }).resolve(date, 'external_event');
+      if (resolved.status !== 'resolved' || Date.parse(resolved.startUtc) <= Date.parse(memory.reference.instant)) return fallback();
+    }
+  }
+  return modelAnswer;
+}
+
+export const enforceTemporalSafety = validateAndGroundMemoryAnswer;
 
 export const AGENT_LIMITS = Object.freeze({ deadlineMs: 25_000, modelTimeoutMs: 10_000,
   modelCalls: 3, maxOutputTokens: 2048, totalOutputTokens: 6144 });
@@ -119,7 +219,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       messages = prepared.messages;
       contextLimitation = prepared.limitation;
     }
-    const changeRequest = isChangeRequest(parsed.data.message);
+    const changeRequest = !options.memory?.memoryOnly && isChangeRequest(parsed.data.message);
     if (changeRequest) messages.splice(1, 0, { role: 'system', content: COMPARISON_INSTRUCTIONS });
     for (let step = 0; step < AGENT_LIMITS.modelCalls; step++) {
       if (performance.now() - startedAt >= limits.data.deadlineMs) return finish('deadline');
@@ -184,6 +284,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
           'Cannot verify: no supported historical baseline was supplied.';
         else if (/(?<!no )\bconfirmed change\b/i.test(answer)) answer = 'Cannot verify: a change verdict was not established by deterministic evidence comparison.';
         if (!checkSourceQuotations(answer, search.sources)) answer = 'Cannot verify: quotation warning: a cited quotation did not match the exact available source text. No unsupported quotation or change claim is accepted.';
+        if (options.memory?.memoryOnly) answer = validateAndGroundMemoryAnswer(answer, options.memory, parsed.data.message);
         if (performance.now() - startedAt >= limits.data.deadlineMs) return finish('deadline');
         deadline.signal.throwIfAborted();
         if (citationIds(answer).some((id) => !knownIds.has(id))) return finish('invalid_citation');
