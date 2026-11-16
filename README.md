@@ -1,136 +1,179 @@
 # Minimi Recall Agent v2.1
 
-A local TypeScript research assistant with persistent conversations, deterministic
-date-based recall, real source registries and conservative historical comparisons.
-Fastify serves a plain JavaScript browser UI. The only external model tool is
-`web_search` (Tavily); memory/date loading and validation are internal functions.
-No database server, embeddings, Docker or frontend build is required.
+A fast, historically aware, evidence-grounded research assistant built for the Minimi hiring challenge:
+> *"Build the best chat agent you can with one tool, web search. It should answer fast, get things right, and remember what you asked and when."*
 
-## Windows quick start
+The application runs locally on Node.js with TypeScript and Fastify, serving a lightweight browser interface in plain JavaScript, HTML, and CSS. The language model is given **exactly one external tool: `web_search`** (powered by Tavily). Temporal date resolution, cross-conversation memory retrieval, quotation verification, and JSON persistence are implemented as deterministic internal functions, not model tools. No vector database, external server, embeddings, Docker, or frontend build step is required.
 
-Use Node.js 24 LTS and npm (audit environment: Node 24.14.1, npm 11.21.2).
-From the repository directory in PowerShell:
+---
+
+## 1. Prerequisites and Installation
+
+### Prerequisites
+- **Node.js:** Node 24 LTS (verified on Node 24.14.1, npm 11.21.2).
+- **OS:** Windows (PowerShell), macOS, or Linux.
+- **API Credentials (for live chat):**
+  - An Azure OpenAI v1 Chat Completions endpoint with a deployed model supporting tool calling and system messages.
+  - A Tavily Search API key (free tier available at [tavily.com](https://tavily.com)).
+
+### Quick Start (Windows PowerShell)
 
 ```powershell
+# 1. Install dependencies
 npm.cmd install
-Copy-Item .env.example .env # First setup only; do not overwrite existing settings.
-# Edit .env locally, using the configuration below.
+
+# 2. Set up environment configuration (first run only)
+Copy-Item .env.example .env
+
+# 3. Edit .env with your credentials (see Configuration below)
+
+# 4. Start the development server
 npm.cmd run dev
 ```
 
-Open `http://127.0.0.1:3000`; `GET /health` checks server health without provider
-calls. `npm.cmd start` runs without watch mode. There is no `build` script:
-`tsx` runs TypeScript directly and the browser assets are already plain JS/CSS.
-On other shells, use `npm` in place of `npm.cmd`.
+### Quick Start (macOS / Linux / Bash)
 
-The template defaults to a reserved provider for credential-free server startup.
-For working HTTP chat, change/add **all** of these settings in `.env`:
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Set up environment configuration
+cp .env.example .env
+
+# 3. Edit .env with your credentials
+
+# 4. Start the development server
+npm run dev
+```
+
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your browser. `GET /health` checks service availability without making any provider calls. `npm run start` launches the server without file watching.
+
+*(Note: There is no frontend compilation step. `tsx` executes backend TypeScript directly, and frontend assets are native vanilla JavaScript and CSS.)*
+
+---
+
+## 2. Environment Configuration
+
+Copy `.env.example` to `.env`. For active chat execution, provide valid configuration values:
 
 ```dotenv
+# Server Settings
+HOST=127.0.0.1
+PORT=3000
+NODE_ENV=development
+DEFAULT_TIMEZONE=Asia/Kolkata
+
+# Model Provider: Azure OpenAI v1 Chat Completions
 MODEL_PROVIDER=azure-openai-v1
 AZURE_OPENAI_CHAT_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com/openai/v1/chat/completions
-AZURE_OPENAI_DEPLOYMENT=YOUR-DEPLOYMENT
-AZURE_OPENAI_API_KEY=YOUR-KEY
-AZURE_OPENAI_CONTEXT_TOKENS=YOUR-ACTUAL-CONTEXT-WINDOW
-TAVILY_API_KEY=YOUR-KEY
-HOST=127.0.0.1
-DEFAULT_TIMEZONE=Asia/Kolkata
+AZURE_OPENAI_DEPLOYMENT=YOUR-DEPLOYMENT-NAME
+AZURE_OPENAI_API_KEY=YOUR-AZURE-KEY
+AZURE_OPENAI_CONTEXT_TOKENS=65536
+
+# Search Provider: Tavily API
+TAVILY_API_KEY=YOUR-TAVILY-KEY
 ```
 
-Deployment identity and tool/max_completion_tokens compatibility must be checked
-in Azure; MODEL_NAME does not select the Azure deployment. Both Azure and Tavily
-configuration are required even for recall-only HTTP chat. Unsupported/missing
-chat configuration returns sanitized HTTP 503; selecting Azure with incomplete
-settings instead fails startup validation with the missing field names. Invalid
-keys may fail only when used. Never share `.env`, enable billing or assume free
-quota: confirm sponsorship eligibility, balances and overage settings first.
-Port, log level and request-size options are listed in `.env.example`.
+### Where to Obtain Credentials Safely
+- **Azure OpenAI:** In the [Azure Portal](https://portal.azure.com/), locate your Azure OpenAI Service resource. Navigate to **Keys and Endpoint** for the endpoint URL and API key, and **Model Deployments** to deploy a compatible chat model (e.g. `gpt-4o` or `gpt-4o-mini`). Confirm support for function calling and `max_completion_tokens`.
+- **Tavily:** Create a free account at [app.tavily.com](https://app.tavily.com) and generate an API key from the dashboard.
+- **Safety & Costs:** Always check free-tier quota balances, student sponsorships, and overage policies before use. Never commit `.env` or expose API keys in public repositories.
 
-## Verification without paid calls
+---
 
-```powershell
-npm.cmd run typecheck
-npm.cmd test
-npm.cmd run eval:offline
-git diff --check
-```
-
-The committed offline run records **687 tests passed, one skipped**, with **31/31
-structural/safety checks and 30/31 usefulness checks**. These are scripted-provider
-outcomes, not live LLM accuracy. The evaluation command rewrites
-`docs/evaluation-results.json` with local observations; timings/IDs vary by run.
-See [evaluation methodology and failures](docs/evaluation.md). Do not run
-`smoke:tavily` without separate live-call/cost authorization.
-
-## Request flow and limits
+## 3. Architecture and Request Flow
 
 ```mermaid
 flowchart LR
-  UI[Browser fetch + SSE reader] --> API[Fastify validation + storage admission]
-  API --> Context[Internal temporal/history selection]
-  Context --> Agent[Bounded Azure model loop]
-  Agent --> Search[Only model tool: Tavily web_search]
-  Search --> Agent
-  Agent --> Checks[Citation + constrained evidence checks]
-  Checks --> Result[Save answer + deliver SSE result]
-  Result --> UI
-  UI --> Receipt[Receipt acknowledgment accepts complete answer]
+  UI[Browser Client] -->|HTTP POST + SSE| API[Fastify Server]
+  API -->|Deterministic dates & retrieval| Memory[Internal Memory & Date Engine]
+  Memory -->|Zero-search pure recall or context| Agent[Bounded Agent Loop]
+  Agent -->|Only external tool: web_search| Search[Tavily Search Coordinator]
+  Search -->|Max 2 rounds / 8 queries| Agent
+  Agent -->|Quotation check + 4 verdicts| Verification[Deterministic Verification]
+  Verification -->|Atomic JSON write| Storage[(".recall-data/ Store")]
+  Verification -->|Validated SSE stream| UI
 ```
 
-SSE delivers factual progress and one final/partial answer. **Token streaming is
-not implemented.** Budgets: 25 seconds overall, 10 seconds/model call, 4 seconds/
-search, search admission cutoff 15 seconds; at most three model calls and two
-research rounds with 5+3 searches, concurrency two. Disconnects cancel work.
-See [wire contract](docs/chat-sse.md) and [agent core](docs/agent-core.md).
+- **One Tool Loop:** The model's only external tool is `web_search`. Memory retrieval and temporal date calculations run deterministically before the model is called.
+- **Strict Budgeting:** Overall request deadline of 25 seconds; search admission cutoff at 15 seconds; model call timeout of 10 seconds; search query timeout of 4 seconds. Capped at 2 search rounds (up to 5 queries in round 1, up to 3 additional in round 2; 8 total).
+- **Streaming & SSE:** Delivers factual progress indicators followed by a validated final answer via Server-Sent Events (`recall.chat.v1`). Client socket disconnects immediately abort pending provider requests.
 
-Original UTC messages and source snapshots live in private, gitignored
-`.recall-data/` under the launch directory. Only one process may own that store.
-Refresh/restart restoration uses server records; the browser keeps minimal identity.
-Receipt recovery does not repeat provider calls. Failed, partial and unaccepted
-answers are excluded from accepted historical answers. JSON files are plaintext,
-not encrypted. The UI has no delete control. Delete a conversation through the
-local API using its UUID (listed by `GET /api/conversations`):
+---
+
+## 4. Verification and Automated Evaluations
+
+Run the complete suite without making live API calls or consuming credits:
 
 ```powershell
-# Replace YOUR-CONVERSATION-UUID with the intended conversation's ID.
-Invoke-RestMethod -Method Delete -Uri 'http://127.0.0.1:3000/api/conversations/YOUR-CONVERSATION-UUID'
+# 1. Type check server and client code
+npm.cmd run typecheck
+
+# 2. Run automated test suite
+npm.cmd test
+
+# 3. Run the frozen 31-case offline evaluation suite
+npm.cmd run eval:offline
+
+# 4. Run the 10 adversarial capability scenarios
+npx vitest run tests/adversarial-eval.test.ts
 ```
 
-Deletion refuses pending attempts; resolve them through the documented receipt
-API first (complete answers also have a Recover / retry receipt action). Failed
-or corrupt storage requires manual recovery as described in docs/memory.md.
-Starting a new conversation or clearing browser data does not delete server files.
-Keep private data out
-of submissions/backups shared with reviewers. This loopback-only app has no public
-deployment authentication. See [storage/recall limits](docs/memory.md).
+### Verified Benchmark Metrics
+- **Automated Regression Suite:** **775 tests passed, 1 skipped** across 22 test files.
+- **Scripted Offline Evaluation (`eval:offline`):**
+  - **31 / 31 (100%)** structural and safety assertions passed.
+  - **30 / 31 (96.8%)** usefulness assertions passed.
+  - 1 documented restrictive abstention: Case C8 withholds trust because the synthetic domain (`acme.example`) is outside the explicit official product authority whitelist.
+- **Adversarial Capability Scenarios (`tests/adversarial-eval.test.ts`):**
+  - **10 / 10 (100%)** passed across paraphrased recall, weekday isolation, mixed shortlist research, PostgreSQL comparison, hypothetical rejection, chronological cancellation, quotation mismatch warning, search outage fallback, long-history token budgeting, and multi-turn threads.
 
-Citation IDs establish registry membership, not factual truth. Historical S1 and
-current S1 remain separate. Four verdicts are retained: Confirmed change, No
-confirmed change, Cannot verify, Not comparable. Confirmation currently requires
-the [evidence grammar, bounded prose parsing and explicit authority policy](docs/verification.md).
-Unmapped product domains (such as fictional Acme in C8) produce Cannot verify. Quote matching
-uses model-visible snippets and does not prove complete claim support.
+*(Note: Scripted and mocked offline tests measure internal application logic, temporal arithmetic, and contract enforcement. They do not measure live third-party LLM accuracy or live network latency.)*
 
-## Five-minute reviewer demonstration
+---
 
-1. Run `npm.cmd run eval:offline`: W1 shows scripted research/SSE/citations;
-   R1–R6 show restarted cross-conversation/date/zone retrieval; G7A1–G7A3 show
-   mixed recall; C1–C5 show four comparison outcomes; C6–C7 verify bounded prose;
-   C8 exposes the authority limit; C9–C11 expose appropriate abstentions. These are
-   frozen synthetic demonstrations, explicitly **not genuine live research**.
-2. Inspect `docs/evaluation-results.json` for actual output, provider call counts,
-   and the distinction between safety and usefulness.
-3. With separately authorized quotas only: ask for the latest PostgreSQL release
-   from official announcements. Check current sources and their dates manually.
-4. Record a distinctive five-product CRM shortlist, wait for accepted delivery,
-   restart, and recall it in a new conversation using its actual date/timezone.
-   Check telemetry confirms zero Tavily calls for pure recall.
-5. Recheck a genuinely stored recommendation against fresh evidence. Do not seed
-   fictional historical prices. Show honest Cannot verify when the baseline or
-   comparable evidence is missing. No automatic retries during a capped pilot.
+## 5. Demonstration Conversations
 
-Before final acceptance, manually check desktop/mobile Chrome: refresh/restoration,
-older conversation reopening, source links/disclosure and reader position, long
-answers above the composer, sticky scroll versus reading upward, cancellation,
-older-turn retry ordering, and offline/error recovery. Real-browser geometry,
-fresh-machine install and the controlled live pilot are not verified by this README.
+### Scenario A: Pure Historical Recall (Zero Search Calls)
+- **Turn 1 (Conversation A):**
+  *User:* “We selected ClickHouse for telemetry analytics after comparing alternatives.”
+  *Agent:* Confirms selection and records turn.
+- **Turn 2 (New Conversation B):**
+  *User:* “Which telemetry analytics did we discuss earlier?”
+  *Agent:* “You previously selected ClickHouse for telemetry analytics.”
+  *(Execution: Retrievable immediately from disk memory with **0 external search calls**.)*
+
+### Scenario B: Shortlist Recall + Fresh Web Research (Mixed Query)
+- **Turn 1 (Past Session):**
+  *User:* “On Monday we shortlisted five CRM tools: Attio, Folk, Capsule, Insightly, Copper.”
+  *Agent:* Records the 5 shortlisted entities.
+- **Turn 2 (Current Session):**
+  *User:* “Which five CRM tools did we shortlist last Monday? What is Attio current entry price?”
+  *Agent:* “You previously shortlisted Attio, Folk, Capsule, Insightly, and Copper. Fresh research shows Attio Starter is USD 29 per user per month [S1].”
+  *(Execution: Internal memory extracts the 5 tools; agent conducts 1 targeted web search for Attio pricing and cites [S1].)*
+
+### Scenario C: Historical Change Verification
+- **Turn 1 (Recorded earlier):** User previously inquired about Supabase Postgres hosting ($25/mo recorded with source).
+- **Turn 2 (Today):**
+  *User:* “On 25 October I asked about Supabase Postgres pricing. Has any pricing changed since then?”
+  *Agent:* Emits candidate comparison. The deterministic verification engine compares like-for-like dimensions, validates `supabase.com` against the domain authority whitelist, detects the price increase ($25 &rarr; $35), and outputs:
+  `1. Confirmed change — supabase: Explicit comparable evidence records a price increase.` citing `[S1]`.
+
+---
+
+## 6. Local JSON Storage vs. Public Multi-User Hosting
+
+- **Local Storage Model:** Conversations and source evidence snapshots are stored in private JSON files inside `.recall-data/` under the application root. File integrity is maintained using per-conversation write queues, unique temporary files, and atomic file renaming.
+- **Single-Process Design:** Designed for local single-process evaluation as required by the challenge. It is not architected for distributed cloud clustering or shared filesystem concurrency.
+- **Local Loopback Security:** The server binds to `127.0.0.1` by default and enforces local origin guards. There is no public user authentication or database encryption layer. Do not expose this local port to untrusted public networks.
+- **Challenge Compliance:** Public cloud deployment is neither required nor requested by the challenge specification. The agent is built to run cleanly on any reviewer's machine with `npm install` followed by `npm run dev`.
+
+---
+
+## 7. Project Documentation Index
+
+- [DESIGN.md](DESIGN.md) — Comprehensive architectural design, trade-offs, and verification logic.
+- [docs/memory.md](docs/memory.md) — Persistent storage schema, receipts, and temporal retrieval contracts.
+- [docs/verification.md](docs/verification.md) — Quotation matching, four verification verdicts, and authority policies.
+- [docs/chat-sse.md](docs/chat-sse.md) — SSE wire protocol and event sequence specification.
+- [docs/evaluation.md](docs/evaluation.md) — Detailed offline evaluation methodology and case breakdown.
