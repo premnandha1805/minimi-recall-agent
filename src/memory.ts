@@ -230,6 +230,24 @@ export class ConversationStore {
   async load(id: string): Promise<Conversation | undefined> {
     parse(Id, id); return this.serial(id, () => this.read(id));
   }
+  /** One coherent, validated view of this private single-user root. Wait for
+   * writes already queued at entry; later commits cannot interleave the scan. */
+  async snapshot(signal?: AbortSignal): Promise<Conversation[]> {
+    if (this.closed) throw new MemoryError('CLOSED');
+    await Promise.all([...this.queues.values()]);
+    return this.serial('$snapshot', () => this.commit(async () => {
+      signal?.throwIfAborted();
+      const { files } = await this.inventory();
+      const values: Conversation[] = [];
+      for (const { name } of files.filter((f) => f.name.endsWith('.json')).sort((a, b) => a.name.localeCompare(b.name))) {
+        signal?.throwIfAborted();
+        const value = await this.readPath(join(this.directory, name));
+        if (!value) throw new MemoryError('CORRUPT');
+        values.push(value);
+      }
+      return values;
+    }));
+  }
   /** Legacy browser IDs are aliases, never canonical server-owned identities. */
   async resolveClientConversation(key: string, timezone?: string): Promise<Conversation> {
     parse(Key, key);

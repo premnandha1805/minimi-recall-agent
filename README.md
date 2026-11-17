@@ -101,6 +101,12 @@ flowchart LR
 
 ---
 
+Current memory behavior: recall searches older conversations in the same private
+server data directory. It returns verified historical excerpts or original messages
+with roles and sent dates; it does not freely invent a paraphrased memory. Calendar
+month/year queries and linked follow-ups are supported within bounded lexical
+retrieval. See [the audit, changes and limitations](docs/memory-reliability.md).
+
 ## 4. Verification and Automated Evaluations
 
 Run the complete suite without making live API calls or consuming credits:
@@ -119,7 +125,17 @@ npm.cmd run eval:offline
 npx vitest run tests/adversarial-eval.test.ts
 ```
 
-### Verified Benchmark Metrics
+Run the dedicated, provider-free memory checks and write their actual measurements:
+
+```powershell
+npm.cmd run eval:memory
+```
+
+Results: [memory-evaluation.json](docs/memory-evaluation.json). These use frozen
+histories and mocked model responses, including deliberately fabricated answers.
+They do not measure live model accuracy or provider latency.
+
+### Previous Baseline Benchmark Metrics
 - **Automated Regression Suite:** **791 tests passed, 1 skipped** across 23 test files.
 - **Scripted Offline Evaluation (`eval:offline`):**
   - **31 / 31 (100%)** structural and safety assertions passed.
@@ -169,6 +185,12 @@ npx vitest run tests/adversarial-eval.test.ts
 - **Challenge Compliance:** Public cloud deployment is neither required nor requested by the challenge specification. The agent is built to run cleanly on any reviewer's machine with `npm install` followed by `npm run dev`.
 
 ---
+
+All browser profiles reaching one local server share one user's history. A new
+conversation does not create a new user. Client-supplied user IDs are rejected;
+conversation IDs are not authentication. Use separate private roots and protected
+OS accounts/instances for different people. Local origin guards do not protect
+against another OS user who can reach the same loopback service.
 
 ## 7. Project Documentation Index
 

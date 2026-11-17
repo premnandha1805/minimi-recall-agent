@@ -113,7 +113,7 @@ describe('deterministic temporal resolver (frozen instants, no providers)', () =
     expect(r.resolve('The Nobel Prize was announced on 3 November 2025', 'conversation')).toMatchObject({ status: 'unsupported' });
     expect(r.resolve('2025 Nobel Prize', 'external_event')).toMatchObject({ status: 'unsupported' });
   });
-  it.each(['last month', 'next week', 'today at 01:30', '03 November CST', '', 'x'.repeat(257), '2026-13-01'])('reports unsupported/invalid expressions rather than using parser guesses: %s', (text) => {
+  it.each(['today at 01:30', '03 November CST', '', 'x'.repeat(257), '2026-13-01'])('reports unsupported/invalid expressions rather than using parser guesses: %s', (text) => {
     expect(resolve(text).status).not.toBe('resolved');
   });
   it.each(['not-an-instant', '2026-11-15', '2025-02-29T00:00:00Z'])('rejects invalid references: %s', (reference) => {

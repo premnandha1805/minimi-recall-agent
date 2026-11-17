@@ -1,45 +1,56 @@
-# Recall — System Architecture
+# Recall ? System Architecture
 
-**Problem.** “On Monday we shortlisted five CRMs. Has anything changed?” A useful agent must reliably answer which five were shortlisted, what was stated when, and whether today's evidence confirms a genuine change. Recall addresses this through deterministic temporal memory, bounded web search, and evidence verification.
+**Purpose.** A local conversational research agent that recalls stored discussions,
+retrieves current external evidence, and distinguishes verified changes from
+missing or incomparable information.
 
-```
-Browser (vanilla JS) ──> Fastify HTTP ──> [Deterministic Memory & Dates]
-                                                │
-                                    ┌───────────┴───────────┐
-                          (Pure recall: 0 search)   (Mixed / Research)
-                                    │                       │
-                                    ▼                       ▼
-                           Model synthesis  <───> Tavily web_search (≤2 rds, ≤8 queries)
-                                    │
-                       [Quotation & Change Checks]
-                                    │
-                                    ▼
-                 Atomic JSON write (.recall-data/) + SSE stream
-```
+**Flow:** browser (plain HTML/CSS/JS) ? Fastify ? deterministic memory/date context ?
+provider-swappable model ? optional Tavily `web_search` ? evidence checks ? atomic
+JSON persistence and SSE result. TypeScript runs on Node.js with `npm install`
+and `npm run dev`; no database daemon or frontend build is required.
 
-## 1. How It Works
+**Memory.** Original messages, roles, IDs, UTC timestamps, turn timezones and source
+snapshots persist in private per-conversation JSON. Server copies win import
+conflicts. Per-conversation queues and a commit-consistent snapshot provide
+read-after-write visibility in one process. Linguistic recall cues select the
+archive; ordinary continuity loads the active conversation. Unicode normalization,
+modest stemming, verb equivalences, independent weighted lexical ranking and
+named anchors retrieve supporting turns across conversations. Adjacent reference
+and correction chains retain their originals. Empty topics require a date,
+explicit broad history request, active antecedent, or clarification. Only eight
+whole recall records enter the bounded context; omissions are disclosed.
 
-- **Single Tool Loop:** `web_search` is the sole external model tool ([agent core](docs/agent-core.md)); memory, dates, citations, and storage are internal functions. Execution is strictly bounded: &le;2 search rounds (up to 5 initial + 3 follow-up), &le;8 queries, 2-way concurrency, and a 15s search cutoff within a 25s deadline.
-- **Temporal Memory:** Conversations persist as versioned JSON in `.recall-data/` ([memory spec](docs/memory.md)). `chrono-node` and IANA timezones resolve relative dates (`conversation` vs `external_event`). An assertion gate filters hypotheticals and questions; chronological chains preserve edits and cancellations, with conservative calendar checks. Pure recall consumes zero search calls.
-- **Verification Gates:** Search results receive request-local source IDs (`[S#]`). Quotations must match source snippets verbatim ([verification spec](docs/verification.md)). Historical comparisons evaluate like-for-like dimensions against an official domain whitelist (`OFFICIAL_PRODUCTS`) across four verdicts: *Confirmed change*, *No confirmed change*, *Cannot verify*, or *Not comparable*.
+**Answers and dates.** Pure recall selects exact message evidence. Valid single
+assertions render with a deterministic change of grammatical perspective;
+transcript requests retain original wording. Conflicts and uncertain synthesis
+retain labeled evidence or request narrowing. Relative phrases use the original
+message reference and IANA timezone; month/year ranges use calendar boundaries.
+Sent, described-event, publication and effective dates remain distinct. Mixed
+answers check personal/historical prose against originals separately from public
+evidence; calendar claims retain the existing date/entity checks. These checks
+are conservative linguistic safeguards, not a general semantic proof system.
 
-## 2. Why This Design
+**Web and reliability.** `web_search` is the only external model tool. Code enforces
+2 rounds, 5+3 queries, 8 total requests including failures, 2-way concurrency,
+per-search timeouts, a 15-second search cutoff and a 25-second request deadline.
+Abort signals handle disconnects. Zod validates requests and results; final output
+is bounded to 16,000 characters before persistence/SSE. Current source IDs are
+request-local; historical markers cannot become live citations. Change checks use
+Confirmed change / No confirmed change / Cannot verify / Not comparable and require
+comparable evidence plus matching quotes. Stored and web content are untrusted.
 
-We prioritized correctness and bounded execution over autonomous complexity: internal memory routing eliminates search latency and API costs; deterministic code gates guard against unsupported claims and quotation mismatches; bounded timeouts, disconnect aborts, and atomic temp-file writes support clean recovery with explicit disclosures on search outages.
+**Scope and tradeoffs.** One private directory represents one local user; loopback
+and same-origin guards are not multi-user authentication. The 100-conversation,
+64 MiB single-process archive avoids external infrastructure and stale indexes.
+Lexical recall can miss semantic paraphrases; conservative synthesis can be verbose.
+Mixed prose can evade linguistic history detection. SSE currently delivers a final
+validated answer rather than provider-token streaming. Zero web requests do not
+mean zero model cost; no quota or paid usage is assumed.
 
-## 3. Trade-offs
-
-- **No Vector DB:** Embeddings introduce fuzzy matching, external daemons, and poor relative calendar arithmetic (`"last Wednesday"` vs `"two Wednesdays ago"`). Keyword + temporal anchoring is deterministic and zero-setup.
-- **No LLM Fact Routers:** Secondary LLM routing calls add an extra network round-trip and token overhead before search begins; deterministic extractors parse intent directly in-process.
-- **No Multi-Agent Swarms:** Swarms multiply token cost, introduce race conditions, and risk exceeding the 25s deadline.
-- **Bounded Research:** Strict 5+3 query caps prevent runaway spending while ensuring synthesis time.
-
-## 4. What We Would Improve With Another Week
-
-1. **Broader Semantic Recall:** Lightweight BM25 or local token-stemming for wider paraphrasing without vector infrastructure.
-2. **True Token Streaming:** Upgrade the Azure OpenAI adapter from request-response (`stream: false`) to live token-by-token SSE streaming ([SSE wire contract](docs/chat-sse.md)).
-3. **Live Latency & Quality Benchmarks:** Measure p50/p95 latency and factual accuracy against an always-search baseline across production LLMs.
-
----
-
-**Grounded Evaluation:** Automated test suite records **791 passed, 1 skipped** across 23 test files; **31/31** scripted safety passes and **30/31** usefulness passes ([evaluation report](docs/evaluation.md); C8 reflects an intentional authority whitelist abstention); and **10/10** mocked adversarial capability passes. *(Measures deterministic orchestration and safety guards, not live model accuracy or network latency.)*
+**Measured evaluation.** 852 tests passed, 1 skipped across 25 files; both typechecks
+passed. The 39-test memory suite retrieved 10/10 expected conversation matches
+with zero unrelated matches in ten frozen queries. Retrieval p50/p95 was
+1.88/37.73 ms; one mocked HTTP run took 125.76 ms. These are synthetic local
+measurements, not live model quality or network benchmarks. No provider calls
+were made for this review. See [review repairs](docs/gate2-review-repairs.md),
+[memory design](docs/memory.md), and [results](docs/memory-evaluation.json).

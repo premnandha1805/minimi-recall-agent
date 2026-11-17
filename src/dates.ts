@@ -126,6 +126,18 @@ export function createTemporalResolver(options: { timezone: string } &
     } else if (lower === 'last week') {
       const weekday = new Date(ordinal(today) * CALENDAR_DAY).getUTCDay();
       start = calendarDay(ordinal(today) - ((weekday + 6) % 7) - 7); days = 7;
+    } else if (/^(?:last|this|next) (?:month|year|week)$/.test(lower)) {
+      const [direction, unit] = lower.split(' ');
+      const shift = direction === 'last' ? -1 : direction === 'next' ? 1 : 0;
+      if (unit === 'week') {
+        const weekday = new Date(ordinal(today) * CALENDAR_DAY).getUTCDay();
+        start = calendarDay(ordinal(today) - ((weekday + 6) % 7) + shift * 7); days = 7;
+      } else {
+        const month = unit === 'year' ? 0 : today.month - 1 + shift;
+        const year = today.year + (unit === 'year' ? shift : 0);
+        start = calendarDay(Date.UTC(year, month, 1) / CALENDAR_DAY);
+        days = Date.UTC(year + (unit === 'year' ? 1 : 0), month + (unit === 'month' ? 1 : 0), 1) / CALENDAR_DAY - ordinal(start);
+      }
     } else if (ago) {
       if (Number(ago[1]) > DATE_LIMITS.daysAgo) return { status: 'unsupported', reason: 'range' };
       start = calendarDay(ordinal(today) - Number(ago[1]));

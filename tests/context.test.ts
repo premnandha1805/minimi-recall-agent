@@ -182,7 +182,8 @@ describe('deterministic stored retrieval and agent context', () => {
     expect(first.status).toBe('found'); expect(first.records.map((r) => r.conversationId)).toEqual([correct.id]);
     expect(again).toEqual(first);
     for (const generic of ['Recall our options', 'Recall our pricing information', 'Recall our tools']) {
-      expect((await retrieveMemory(store([correct]), opts(generic))).status).toBe('not_found');
+      const vague = await retrieveMemory(store([correct]), opts(generic));
+      expect(vague.status).toBe('ambiguous'); expect(vague.records).toEqual([]);
     }
   });
   it('Gate 7A keeps competing discussions ambiguous, including separated turns in one conversation', async () => {
@@ -193,7 +194,7 @@ describe('deterministic stored retrieval and agent context', () => {
     expect((await retrieveMemory(store([a]), opts('Recall Postgres hosting'))).status).toBe('ambiguous');
   });
   it.each(['What did I ask on 31 November? Is it still correct today?', 'Recall Postgres on 03/11/2026',
-    'Recall Postgres last month', 'What did we discuss yesterday and today?', 'Recall Postgres on Christmas'])('Gate 7A invalid/ambiguous locator: %s', async (query) => {
+    'What did we discuss yesterday and today?', 'Recall Postgres on Christmas'])('Gate 7A invalid/ambiguous locator: %s', async (query) => {
     expect((await retrieveMemory(store([conversation(10)]), opts(query))).status).toBe('unsupported_date');
   });
   it('Gate 7A separates same-sentence verification and preserves genuinely historical today', async () => {
@@ -385,8 +386,8 @@ describe('deterministic stored retrieval and agent context', () => {
         },
       });
       expect(search).not.toHaveBeenCalled();
-      expect(res.answer).toBe('You previously mentioned an Infosys meeting on 23 August.');
-      expect(res.answer).not.toMatch(/\b202\d\b/);
+      expect(res.answer).toContain('> 23rd August I have a meeting with Infosys.');
+      expect(res.answer).not.toMatch(/August 202\d/);
     });
 
     it('2. Same memory -> "When is my Infosys meeting?"', async () => {
@@ -524,7 +525,7 @@ describe('deterministic stored retrieval and agent context', () => {
       expect(search).not.toHaveBeenCalled();
       expect(res.answer).not.toContain('AGM');
       expect(res.answer).not.toContain('board meeting');
-      expect(res.answer).toContain('23 August');
+      expect(res.answer).toContain('23rd August');
     });
 
     it('10. Pure recall causes zero Tavily searches', async () => {
@@ -702,7 +703,7 @@ describe('deterministic stored retrieval and agent context', () => {
           expect(request.tools).toEqual([]);
           return { text: 'Only your original 23 August statement is recorded.', finishReason: 'stop', toolCalls: [] };
         } } });
-      expect(response.answer).toBe('Only your original 23 August statement is recorded.');
+      expect(response.answer).toContain('> 23rd August I have a meeting with Infosys.');
     });
 
     it('keeps calendar dates in personal questions separate from conversation timestamps', async () => {
@@ -723,7 +724,7 @@ describe('deterministic stored retrieval and agent context', () => {
           expect(data.records[0].originalTimeReferences[0].mentions).toEqual([]);
           return { text: 'You mentioned 23 August without a year, so I cannot establish whether it is upcoming.', finishReason: 'stop', toolCalls: [] };
         } } });
-      expect(response.answer).not.toMatch(/\b202\d\b/); expect(search).not.toHaveBeenCalled();
+      expect(response.answer).not.toMatch(/August 202\d/); expect(search).not.toHaveBeenCalled();
     });
 
     it('scans the full local store and keeps assistant seeds out of private facts', async () => {
@@ -787,7 +788,7 @@ describe('deterministic stored retrieval and agent context', () => {
         const request = { conversationId: b.id, message: 'When is my meeting with Infosys?', turn: { key: 'recall', attemptKey: 'one' } };
         const response = await app.inject({ method: 'POST', url: '/api/chat', payload: request });
         const stream = await readChatStream(new Response(response.body));
-        expect(stream.result!.message.content).toContain('23 August'); expect(network).toHaveBeenCalledTimes(1);
+        expect(stream.result!.message.content).toContain('23rd August'); expect(network).toHaveBeenCalledTimes(1);
         const replay = await app.inject({ method: 'POST', url: '/api/chat', payload: request });
         expect((await readChatStream(new Response(replay.body))).result).toEqual(stream.result);
         expect(network).toHaveBeenCalledTimes(1);
@@ -894,8 +895,8 @@ describe('deterministic stored retrieval and agent context', () => {
           }),
         },
       });
-      expect(response.answer).not.toMatch(/\b202[67]\b/);
-      expect(response.answer).toContain('year was not specified; cannot verify if upcoming');
+      expect(response.answer).not.toMatch(/August 202[67]/);
+      expect(response.answer).toContain('Sent dates identify messages, not event dates.');
     });
 
     it('9. Missing personal preferences: honest not_found with zero Tavily', async () => {

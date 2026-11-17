@@ -8,6 +8,7 @@ import { contextFits, ModelResponseSchema, type ModelMessage, type ModelProvider
 import { AGENT_SYSTEM_PROMPT } from './prompts.js';
 import { abortOutcome, observeStage, sourceCounts, tokenUsage, type StageObserver, type StageOutcome, type ValidationCategory } from './observability.js';
 import { SEARCH_LIMITS, SearchArgumentsSchema, SearchSession, WEB_SEARCH_TOOL, type Source, type WebSearch } from './search.js';
+import { groundedRecallAnswer, groundHistoricalProse } from './recall-answer.js';
 
 /** Select one exact contiguous excerpt; never join separated claims into a quotation. */
 function excerpt(text: string, query: string, size: number, preserveLineStart = false): string {
@@ -234,7 +235,8 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       const memory = options.memory;
       if (memory.memoryOnly && memory.status === 'not_found') return finish('answer', 'I did not find a suitable record in the stored conversations. No historical details have been inferred.');
       if (memory.memoryOnly && memory.status === 'unsupported_date') return finish('answer', 'The historical date reference is ambiguous or unsupported. Please specify an ISO date or a supported calendar expression and timezone.');
-      if (memory.memoryOnly && memory.status === 'limited') return finish('answer', memory.limitation ?? 'Historical coverage is limited. Please narrow the date or topic.');
+      if (memory.memoryOnly && memory.status === 'ambiguous' && !memory.records.length) return finish('answer', memory.limitation ?? 'Which topic or date do you mean?');
+      if (memory.memoryOnly && memory.status === 'limited' && (!memory.groundedRecall || !memory.records.length)) return finish('answer', memory.limitation ?? 'Historical coverage is limited. Please narrow the date or topic.');
       const prepared = prepareAgentContext(memory, parsed.data.message, options.provider.contextWindowTokens,
         Math.min(AGENT_LIMITS.maxOutputTokens, limits.data.outputTokenBudget));
       if (!prepared.messages.length) return finish('answer', (isChangeRequest(parsed.data.message) ? 'Cannot verify: ' : '') + prepared.limitation);
@@ -306,8 +308,12 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
           'Cannot verify: no supported historical baseline was supplied.';
         else if (/(?<!no )\bconfirmed change\b/i.test(answer)) answer = 'Cannot verify: a change verdict was not established by deterministic evidence comparison.';
         if (!checkSourceQuotations(answer, search.sources)) answer = 'Cannot verify: quotation warning: a cited quotation did not match the exact available source text. No unsupported quotation or change claim is accepted.';
-        if (options.memory?.memoryOnly) answer = validateAndGroundMemoryAnswer(answer, options.memory, parsed.data.message);
-        else if (options.memory?.recall && !changeRequest) answer = groundMixedMemoryAnswer(answer, options.memory);
+        if (options.memory?.memoryOnly) answer = options.memory.groundedRecall ? groundedRecallAnswer(response.text, options.memory, parsed.data.message) :
+          validateAndGroundMemoryAnswer(answer, options.memory, parsed.data.message);
+        else if (options.memory?.recall && !changeRequest) {
+          const memory = options.memory;
+          answer = groundHistoricalProse(answer, memory, (sentence) => groundMixedMemoryAnswer(sentence, memory));
+        }
         if (performance.now() - startedAt >= limits.data.deadlineMs) return finish('deadline');
         deadline.signal.throwIfAborted();
         if (citationIds(answer).some((id) => !knownIds.has(id))) return finish('invalid_citation');

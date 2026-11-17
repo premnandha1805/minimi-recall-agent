@@ -3,8 +3,9 @@ import { createTemporalResolver, type TemporalResult } from './dates.js';
 import type { Conversation, ConversationStore } from './memory.js';
 import { contextFits, type ModelMessage } from './model.js';
 import { WEB_SEARCH_TOOL } from './search.js';
-import { AGENT_SYSTEM_PROMPT } from './prompts.js';
+import { AGENT_SYSTEM_PROMPT, RECALL_OUTPUT_INSTRUCTIONS } from './prompts.js';
 import { ExecutionTimeoutError, runWithSignal, createDeadlineScope } from './execution.js';
+import { rankMemory, stem } from './memory-ranking.js';
 
 export const RETRIEVAL_LIMITS = Object.freeze({ conversations: 100, scannedRecords: 150_000,
   selected: 8, contextBytes: 32_768 });
@@ -20,6 +21,8 @@ export interface RetrievedMemory {
   status: 'found' | 'not_found' | 'ambiguous' | 'limited' | 'unsupported_date';
   records: HistoricalRecord[]; matches: number; limitation?: string;
   temporal?: TemporalResult;
+  /** Enables the extractive evidence contract for production retrieval. */
+  groundedRecall?: boolean;
 }
 const stopWords = new Set(('what did i you we our the a an on in at to from earlier previous past last discuss discussion discussed ask asked tell me ' +
   'which five tools shortlist shortlisted summarize summarise conversation conversations about and of was were with has have changed now current latest ' +
@@ -27,8 +30,13 @@ const stopWords = new Set(('what did i you we our the a an on in at to from earl
   'can could would please kindly recall remember remind us about tell share give again answer still valid accurate then ' +
   'today yesterday monday tuesday wednesday thursday friday saturday sunday week days ago november january february march april may june july august september october december ' +
   'my mine your yours our ours when where who how why do does got be am are been being say said mention mentioned state stated date dates time times day upcoming scheduled planned ' +
-  'decide decided agree agreed choose chose chosen talked next recent currently').split(' '));
+  'decide decided agree agreed choose chose chosen talked next recent currently previously before back had done been ' +
+  'topic topics something anything everything it its that those these them they there here s ' +
+  'month months year years discussion history interactions interaction regarding concerning related ' +
+  'was were should will shall').split(' '));
 const synonyms: Readonly<Record<string, string>> = Object.freeze({
+  bought: 'buy', purchased: 'buy', purchase: 'buy', learnt: 'learn',
+  selected: 'select', chosen: 'choose', chose: 'choose',
   postgresql: 'postgres',
   crms: 'crm',
   meetings: 'meeting',
@@ -47,7 +55,7 @@ const synonyms: Readonly<Record<string, string>> = Object.freeze({
 function keywords(text: string): string[] {
   return [...new Set(text.normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])]
     .map((v) => synonyms[v] ?? v)
-    .filter((v) => !stopWords.has(v) && !/^\d+$/.test(v) && v.length > 1);
+    .filter((v) => !stopWords.has(v) && !/^\d+$/.test(v) && v.length > 1).map(stem);
 }
 const scheduleTerms = 'meetings?|appointments?|calls?|interviews?|events?|plans?|schedule|calendar';
 function isPersonalRecall(query: string): boolean {
@@ -59,6 +67,9 @@ function isPersonalRecall(query: string): boolean {
   if (/\b(?:what|which|who|when|where)\b[^?!;.]{0,80}\b(?:my|our)\b/i.test(query) ||
       /\b(?:where|when)\s+(?:do|did|am|are|was|were)\s+(?:i|we)\b/i.test(query) ||
       /\b(?:what|which)\b[^?!;.]{0,60}\b(?:do|did)\s+(?:i|we)\s+(?:prefer|like|love|use|own)\b/i.test(query)) return true;
+  // Possessive interrogatives and first-person past questions are independent
+  // of the subject noun. Runtime/device exclusions above remain deliberate.
+  if (/\b(?:who|what|which|where|when|how)\b[^?!;.]{0,100}\bdid\s+(?:i|we)\b/i.test(query)) return true;
   if (/\b(?:what (?:date|time|day) (?:is (?:my|our)|do (?:i|we) have)|when (?:is (?:my|our|the)|do (?:i|we) have)|do (?:i|we) have (?:any|a)|have (?:i|we) got (?:any|a)|did (?:i|we) (?:mention|schedule|plan|have|say)|what did (?:i|we) (?:say|mention|schedule|plan)|what (?:are )?(?:my|our))\b/i.test(query) &&
       new RegExp(`\\b(?:${scheduleTerms})\\b`, 'i').test(query)) {
     return true;
@@ -75,6 +86,7 @@ function isPersonalRecall(query: string): boolean {
 }
 export function isExternalRequest(query: string): boolean {
   const hasExplicitExternalIntent =
+    /\b(?:latest|current|up.to.date)\b/i.test(query) && !/\b(?:my|our)\s+(?:meeting|appointment|schedule|plan)\b/i.test(query) ||
     /\b(?:current|latest|today'?s?|live|real-time|market)\s+(?:price|prices|quote|quotes|value|trading)\b/i.test(query) ||
     /\b(?:stock price|share price)\b/i.test(query) ||
     /\b(?:latest|today'?s?|breaking)\b[^?!;.]{0,40}\bnews\b/i.test(query) ||
@@ -96,9 +108,12 @@ export function isExternalRequest(query: string): boolean {
 export function recallIntent(query: string) {
   const isPersonal = isPersonalRecall(query);
   const recall = isChangeRequest(query) || isPersonal ||
+    /\b(?:what|which)\b[^?!;.]{0,80}\bdid (?:i|we)\b/i.test(query) ||
+    /\b(?:those|these)\s+(?:\w+\s+)?(?:options|tools|recommendations)\b|\bwhat (?:was|were) (?:it|they)\b/i.test(query) ||
+    /\b(?:what (?:was|were|have|had) (?:i|we)|(?:last|previous|earlier|past) (?:chat|conversation|discussion)|(?:you|we) (?:recommended|suggested)|(?:those|that|these) (?:options|tools|project|topic)|continue (?:our|the|that|previous))\b/i.test(query) ||
     /\b(?:(?:what|when|where|which|how) did (?:i|we)|(?:i|we) (?:asked|discussed|shortlisted)|which .{0,80}did we|summari[sz]e our (?:earlier|previous)|earlier conversation|recall|remember|remind|our earlier)\b/i.test(query);
-  const memoryOnly = recall && (isPersonal ? !isExternalRequest(query) :
-    !isChangeRequest(query) && !/\b(?:now|current|latest|changed|compare|verify|update|still)\b/i.test(query));
+  const memoryOnly = recall && !isExternalRequest(query) && (isPersonal ? true :
+    !isChangeRequest(query) && !/\b(?:now|current|latest|changed|verify|update|still)\b/i.test(query));
   return { recall, memoryOnly };
 }
 /** Separate the remembered discussion from follow-up instructions, without a model call. */
@@ -117,9 +132,11 @@ const dateExpressions = new RegExp(`\\b(?:\\d{1,4}[/.\\-]\\d{1,2}(?:[/.\\-]\\d{1
 function dateHint(locator: string): string | undefined {
   const spans = [...locator.matchAll(dateExpressions)];
   if (spans.length > 1) return 'unsupported multiple temporal references';
+  if (spans.length && /\bon\s+(?:the\s+)?\d+(?:st|nd|rd|th)\b/i.test(locator)) return 'unsupported partial calendar reference';
   if (spans.length) return spans[0][0];
-  // An unrecognized explicit calendar locator must not become an unrestricted lookup.
-  if (/\b(?:on|during)\s+\S/i.test(locator)) return 'unsupported calendar reference';
+  // A preposition alone is not a date: "working on Atlas" is a topic locator.
+  // Unsupported explicit holiday/partial-date expressions still need clarification.
+  if (/\b(?:on|during)\s+(?:the\s+)?(?:\d|Christmas|Easter|Thanksgiving|New Year's)\b/i.test(locator)) return 'unsupported calendar reference';
   return undefined;
 }
 const descriptiveTerms = new Set('options details notes information recommendations pricing cost costs services available affordable managed suitable comparison'.split(' '));
@@ -134,9 +151,10 @@ const adjacentCorrection = new RegExp(
 );
 /** Shared by retrieval and answer validation; updates remain original evidence. */
 export function isMemoryUpdate(content: string): boolean {
-  return adjacentCorrection.test(content.trim()) || eventUpdate.test(content);
+  return adjacentCorrection.test(content.trim()) || eventUpdate.test(content) ||
+    /\b(?:is|was|has been|got)\s+(?:cancelled|canceled|rescheduled|postponed|renamed|replaced)\b/i.test(content);
 }
-function isPersonalAssertion(content: string): boolean {
+function isPersonalAssertion(content: string, query = ''): boolean {
   const trimmed = content.trim();
   if (/\?\s*$/.test(trimmed)) return false;
   if (/^(?:what|which|when|where|who|whom|whose|why|how|do|does|did|is|are|am|was|were|has|have|had|can|could|would|should|shall|will|may|might|must)\b/i.test(trimmed)) return false;
@@ -145,14 +163,9 @@ function isPersonalAssertion(content: string): boolean {
   if (/\b(?:imagine|suppose|assuming|assume|hypothetically|pretend|what if|fictional|example)\b/i.test(trimmed)) return false;
   if (/^(?:if|unless|in case)\b/i.test(trimmed)) return false;
   if (/\b(?:maybe|perhaps|not sure|dont know|don't know|might be|doubt)\b/i.test(trimmed)) return false;
-  if (/\b(?:my|our)\s+(?:brother|sister|mother|father|mom|dad|parent|parents|friend|friends|colleague|colleagues|coworker|coworkers|boss|manager|client|clients|wife|husband|partner|son|daughter|cousin|family)\b/i.test(trimmed)) return false;
-  if (/\b(?:i|we)\s+(?:have|had|am having|have got|scheduled|booked|plan|plans|planned|plan to|prefer|preferred|prefers|like|liked|love|loved|use|used|work|worked|live|lived|built|am building|building|build|chose|decided|want|need)\b/i.test(trimmed)) return true;
-  if (/\b(?:my|our)\s+(?:[\p{L}\p{N} -]{0,30}\s+)?(?:meeting|appointment|interview|call|event|plan|plans|schedule|preference|preferences|favorite|favourite|stock|stocks|portfolio|flight|budget|project|name|dog|cat|pet|car|house|home|job|company|team|role|salary|language|city|town|address|doctor|dentist)\b/iu.test(trimmed)) return true;
-  if (/\b(?:my|our)\s+[\p{L}\p{N}]+(?:\s+[\p{L}\p{N}]+)?\s+(?:is|are|was|were|has|have|had|will|costs?|called|named)\b/iu.test(trimmed)) return true;
-  if (/^(?:\d{1,2}(?:st|nd|rd|th)?\s+[a-z]+|[a-z]+\s+\d{1,2}(?:st|nd|rd|th)?)\b[^?!;.]{0,40}\b(?:i|we)\s+have\b/i.test(trimmed)) return true;
-  if (eventUpdate.test(trimmed)) return true;
-  if (adjacentCorrection.test(trimmed)) return true;
-  return false;
+  const relation = trimmed.match(/\b(?:my|our)\s+(brother|sister|mother|father|mom|dad|parent|parents|friend|friends|colleague|colleagues|coworker|coworkers|boss|manager|client|clients|wife|husband|partner|son|daughter|cousin|family)\b/i)?.[1];
+  if (relation && !keywords(query).includes(stem(relation.toLowerCase()))) return false;
+  return true; // Any other declarative text is evidence, not a domain whitelist.
 }
 /** Originals are retained here. Only accepted server assistants are eligible. */
 function records(value: Conversation): HistoricalRecord[] {
@@ -166,7 +179,7 @@ function records(value: Conversation): HistoricalRecord[] {
     }),
   ];
 }
-async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'>, options: {
+async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'> & Partial<Pick<ConversationStore, 'snapshot'>>, options: {
   query: string; activeConversationId: string; currentTurnId: string; referenceInstant: string; timezone: string;
   signal: AbortSignal; startedAt: number; deadlineMs: number;
 }): Promise<RetrievedMemory> {
@@ -175,7 +188,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
     if (performance.now() - options.startedAt >= options.deadlineMs) throw new ExecutionTimeoutError();
   };
   const intent = recallIntent(options.query);
-  const memory: RetrievedMemory = { ...intent, reference: { instant: options.referenceInstant, timezone: options.timezone }, status: 'not_found', records: [], matches: 0 };
+  const memory: RetrievedMemory = { ...intent, reference: { instant: options.referenceInstant, timezone: options.timezone }, status: 'not_found', records: [], matches: 0, groundedRecall: true };
   memory.reference.localTime = new Intl.DateTimeFormat('en-GB', { timeZone: options.timezone, dateStyle: 'full', timeStyle: 'long' }).format(new Date(options.referenceInstant));
   const locator = historicalLocator(options.query);
   const personal = isPersonalRecall(locator);
@@ -186,71 +199,112 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
     if (memory.temporal.status !== 'resolved') { memory.status = 'unsupported_date'; return memory; }
   }
   const topic = keywords(locator.replace(dateExpressions, ' '));
-  const anchors = topic.filter((word) => !descriptiveTerms.has(word));
+  const descriptive = new Set([...descriptiveTerms].map(stem));
+  let anchors = [...new Set(topic.filter((word) => !descriptive.has(word)))];
+  if (anchors.length > 64) {
+    memory.status = 'limited'; memory.limitation = 'Narrow the question to at most 64 distinct lookup terms; historical retrieval was not completed.';
+    return memory;
+  }
+  const broadChronology = !!memory.temporal || /\b(?:what did (?:i|we) (?:discuss|ask)|summari[sz]e (?:our|my) (?:history|conversations?)|message.level|transcript)\b/i.test(locator);
   const candidates: Array<{ record: HistoricalRecord; score: number }> = [];
-  let scanned = 0;
-  const consider = (value: Conversation) => {
-    const current = value.id === options.activeConversationId ? value.turns.find((t) => t.id === options.currentTurnId) : undefined;
-    const all = records(value);
-    const eligible = all.filter((r) => Date.parse(r.user.timestamp) <= Date.parse(options.referenceInstant) &&
-      !(r.provenance === 'server_recorded' && current && r.ordinal >= current.ordinal));
-    for (const r of eligible) {
-      check(); if (++scanned > RETRIEVAL_LIMITS.scannedRecords) { memory.limitation = 'Stored record scan limit reached.'; break; }
-      if (r.assistant && Date.parse(r.assistant.timestamp) > Date.parse(options.referenceInstant)) { delete r.assistant; r.evidence = []; }
-      const time = Date.parse(r.user.timestamp);
-      if (memory.temporal?.status === 'resolved' && (time < Date.parse(memory.temporal.startUtc) || time >= Date.parse(memory.temporal.endUtcExclusive))) continue;
-      // Assistant claims (including imported assistant seeds) cannot establish a
-      // private user fact. Keep their labels/text for discussion recall instead.
-      if (personal && (r.user.role === 'assistant' || !isPersonalAssertion(r.user.content))) continue;
-      const haystack = new Set(keywords(personal ? r.user.content : `${r.user.content} ${r.assistant?.content ?? ''}`));
-      const overlap = topic.filter((word) => haystack.has(word)).length;
-      // Entity/topic anchors are mandatory; descriptive wording contributes to rank.
-      // Generic words alone never establish a topic or authorize a date-free scan match.
-      if (intent.recall && (topic.length ? !anchors.length || anchors.some((word) => !haystack.has(word)) ||
-          overlap * 2 < topic.length : !memory.temporal)) continue;
-      if (!intent.recall && r.conversationId !== options.activeConversationId) continue;
-      r.selection = 'match';
-      candidates.push({ record: r, score: overlap * 10 + (memory.temporal ? 100 : 0) });
-    }
-    if (personal) {
-      const selected = new Map(candidates.filter((v) => v.record.conversationId === value.id && v.record.provenance === 'server_recorded')
-        .map((v) => [v.record.ordinal, v]));
-      for (const neighbor of eligible.filter((r) => r.provenance === 'server_recorded').sort((a,b) => a.ordinal - b.ordinal)) {
-        check();
-        const anchor = selected.get(neighbor.ordinal - 1);
-        if (!anchor || selected.has(neighbor.ordinal) || !adjacentCorrection.test(neighbor.user.content.trim())) continue;
-        const kind = neighbor.user.content.match(/^(?:my|our|the|that)\s+(meeting|appointment|interview|call|event|plan)\b/i)?.[1];
-        if (kind && !keywords(anchor.record.user.content).includes(kind.toLowerCase())) continue;
-        if (memory.temporal?.status === 'resolved' && Date.parse(neighbor.user.timestamp) >= Date.parse(memory.temporal.endUtcExclusive)) continue;
-        neighbor.selection = 'adjacent';
-        const candidate = { record: neighbor, score: anchor.score - 1 };
-        candidates.push(candidate); selected.set(neighbor.ordinal, candidate);
-      }
-    } else if (intent.recall && topic.length) {
-      const anchors = candidates.filter((v) => v.record.conversationId === value.id && v.record.provenance === 'server_recorded');
-      for (const anchor of anchors) {
-        check();
-        const neighbor = eligible.find((r) => r.provenance === 'server_recorded' && r.ordinal === anchor.record.ordinal + 1 &&
-          /^(?:and|those|they|it|also|why|how)\b/i.test(r.user.content));
-        if (neighbor && !candidates.some((v) => v.record === neighbor) &&
-            (memory.temporal?.status !== 'resolved' || Date.parse(neighbor.user.timestamp) < Date.parse(memory.temporal.endUtcExclusive))) {
-          neighbor.selection = 'adjacent'; candidates.push({ record: neighbor, score: anchor.score - 1 });
-        }
-      }
-    }
-  };
+  const values: Conversation[] = [];
   if (!intent.recall) {
     check(); const active = await runWithSignal(options.signal, () => store.load(options.activeConversationId));
-    check(); if (active) consider(active);
+    check(); if (active) values.push(active);
+  } else if (store.snapshot) {
+    values.push(...await runWithSignal(options.signal, () => store.snapshot!(options.signal))); check();
   } else {
+    // Compatibility with small injectable stores; production uses one snapshot.
     for (const offset of [0, 50]) {
       check(); const page = await runWithSignal(options.signal, () => store.list({ offset, limit: 50 })); check();
       for (const item of page.items) {
-        check(); const value = await runWithSignal(options.signal, () => store.load(item.id)); check();
+        const value = await runWithSignal(options.signal, () => store.load(item.id)); check();
         if (!value) throw new Error('Historical storage changed during retrieval');
-        consider(value);
+        values.push(value);
       }
       if (offset + page.items.length >= page.total) break;
+    }
+  }
+  const eligible: HistoricalRecord[] = [];
+  for (const value of values) {
+    const current = value.id === options.activeConversationId ? value.turns.find((t) => t.id === options.currentTurnId) : undefined;
+    for (const r of records(value)) {
+      check();
+      if (Date.parse(r.user.timestamp) > Date.parse(options.referenceInstant) ||
+          (current && r.provenance === 'server_recorded' && r.ordinal >= current.ordinal)) continue;
+      if (r.assistant && Date.parse(r.assistant.timestamp) > Date.parse(options.referenceInstant)) { delete r.assistant; r.evidence = []; }
+      eligible.push(r);
+      if (eligible.length > RETRIEVAL_LIMITS.scannedRecords) {
+        memory.status = 'limited'; memory.limitation = 'Stored record scan limit reached; retrieval was not completed.'; return memory;
+      }
+    }
+  }
+  // A pronoun can use recent active context as a locator, but never a random
+  // other conversation. Without an active antecedent the matches stay ambiguous.
+  if (intent.recall && /\b(?:those|these|that|this|it)\b/i.test(locator)) {
+    const active = eligible.filter((r) => r.conversationId === options.activeConversationId).slice(-2);
+    if (active.length && anchors.length === 0) anchors = [...new Set(active.flatMap((r) => keywords(r.user.content)))];
+  }
+  if (anchors.length > 64) {
+    memory.status = 'limited'; memory.limitation = 'Narrow the reference; its antecedent exceeds 64 lookup terms.'; return memory;
+  }
+  if (intent.recall && !anchors.length && !broadChronology) {
+    memory.status = 'ambiguous'; memory.limitation = 'Which topic or conversation do you mean? Please give a subject or date.';
+    return memory;
+  }
+  const inDate = (r: HistoricalRecord) => memory.temporal?.status !== 'resolved' ||
+    (Date.parse(r.user.timestamp) >= Date.parse(memory.temporal.startUtc) && Date.parse(r.user.timestamp) < Date.parse(memory.temporal.endUtcExclusive));
+  const relatedReference = (text: string) => /^(?:and|those|they|it|also|why|how|which one)\b|\b(?:this|that|those|these)\s+(?:topic|project|option|one|technology|idea)\b/i.test(text);
+  const neighbors = new Map<string, HistoricalRecord>();
+  for (const r of eligible) neighbors.set(`${r.conversationId}:${r.provenance}:${r.ordinal}`, r);
+  const neighbor = (r: HistoricalRecord, delta: number) => neighbors.get(`${r.conversationId}:${r.provenance}:${r.ordinal + delta}`);
+  const sharesTopic = (a: HistoricalRecord, b: HistoricalRecord) => {
+    const terms = new Set(keywords(a.user.content));
+    return keywords(b.user.content).some((term) => !descriptive.has(term) && terms.has(term));
+  };
+  const pool = eligible.filter((r) => inDate(r) && (!personal || r.user.role !== 'assistant' && isPersonalAssertion(r.user.content, locator)));
+  const documents = pool.map((r) => {
+    // Rank a reference with its antecedent, but keep the originals separate.
+    const previous = neighbor(r, -1);
+    const before = previous && (relatedReference(r.user.content) || !personal && sharesTopic(previous, r)) ? previous : undefined;
+    return keywords([r.user.content, personal ? '' : r.assistant?.content ?? '',
+      before?.user.content ?? '', before?.assistant?.content ?? ''].join(' '));
+  });
+  const namedAnchors = [...locator.matchAll(/\b[A-Z][a-zA-Z0-9]+\b/g)].flatMap((match) => keywords(match[0])).filter((term) => anchors.includes(term));
+  const scores = intent.recall && anchors.length ? rankMemory(anchors, documents) : pool.map(() => 1);
+  const recentMatches = new Map<string, HistoricalRecord[]>();
+  pool.forEach((r, index) => {
+    check();
+    if (!scores[index] || intent.recall && namedAnchors.some((term) => !documents[index].includes(term))) return;
+    const ownTerms = new Set(keywords(`${r.user.content} ${personal ? '' : r.assistant?.content ?? ''}`));
+    r.selection = anchors.length && !anchors.some((term) => ownTerms.has(term)) ? 'adjacent' : 'match';
+    const previousMatches = recentMatches.get(r.conversationId) ?? [];
+    if (isMemoryUpdate(r.user.content) && previousMatches.some((previous) => sharesTopic(previous, r))) r.selection = 'adjacent';
+    recentMatches.set(r.conversationId, [...previousMatches.slice(-1), r]);
+    candidates.push({ record: r, score: scores[index] });
+  });
+  // Preserve contiguous references and corrections in both directions. Only
+  // server turns have known relationships; imports remain separate provenance.
+  if (intent.recall && anchors.length) {
+    const selected = new Set(candidates.map((c) => c.record));
+    for (let i = 0; i < candidates.length; i++) {
+      check(); const anchor = candidates[i]; const r = anchor.record;
+      if (r.provenance !== 'server_recorded') continue;
+      for (const delta of [-1, 1]) {
+        const next = neighbor(r, delta);
+        if (!next || selected.has(next) || !inDate(next)) continue;
+        const reference = delta === -1 ? r : next;
+        const before = neighbor(r, -1);
+        const bridgesReference = delta === 1 && before && relatedReference(r.user.content) && sharesTopic(before, next);
+        if (!relatedReference(reference.user.content) && !isMemoryUpdate(reference.user.content) && (personal || !sharesTopic(r, next) && !bridgesReference)) continue;
+        // A named different event must not inherit the previous event's identity.
+        const kind = reference.user.content.match(/^(?:my|our|the|that)\s+(meeting|appointment|interview|call|event|plan)\b/i)?.[1];
+        const antecedent = delta === -1 ? next : r;
+        if (kind && !keywords(antecedent.user.content).includes(stem(kind))) continue;
+        if (personal && delta === -1 && !relatedReference(r.user.content)) continue;
+        next.selection = 'adjacent'; selected.add(next);
+        candidates.push({ record: next, score: anchor.score - 0.001 });
+      }
     }
   }
   candidates.sort((a, b) => b.score - a.score || Date.parse(b.record.user.timestamp) - Date.parse(a.record.user.timestamp) ||
@@ -267,7 +321,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
   for (let i = 0; i < ordered.length; i++) {
     const r = ordered[i].record; const previous = ordered[i - 1]?.record;
     const previousTopics = new Set(previous ? keywords(previous.user.content).filter((word) => !descriptiveTerms.has(word)) : []);
-    const related = anchors.length > 0 || /^(?:and|those|they|it|also|why|how)\b/i.test(r.user.content) ||
+    const related = r.selection === 'adjacent' || anchors.length > 0 || /^(?:and|those|they|it|also|why|how)\b/i.test(r.user.content) ||
       keywords(r.user.content).some((word) => previousTopics.has(word));
     if (!previous || r.provenance !== 'server_recorded' || previous.provenance !== 'server_recorded' ||
         r.conversationId !== previous.conversationId || r.ordinal !== previous.ordinal + 1 ||
@@ -281,7 +335,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
 }
 
 /** Inherit arrival time; bound stalled storage even if it ignores cancellation. */
-export async function retrieveMemory(store: Pick<ConversationStore, 'list' | 'load'>, options: Parameters<typeof retrieveMemoryImpl>[1]): Promise<RetrievedMemory> {
+export async function retrieveMemory(store: Pick<ConversationStore, 'list' | 'load'> & Partial<Pick<ConversationStore, 'snapshot'>>, options: Parameters<typeof retrieveMemoryImpl>[1]): Promise<RetrievedMemory> {
   const scope = createDeadlineScope(options.signal, Math.max(0, options.deadlineMs - (performance.now() - options.startedAt)));
   try { scope.signal.throwIfAborted(); return await retrieveMemoryImpl(store, { ...options, signal: scope.signal }); }
   finally { scope.dispose(); }
@@ -294,7 +348,9 @@ export function memoryData(memory: RetrievedMemory, selected = memory.records) {
     const qualify = (text: string) => text.replace(/\\?\[(S\d+)\\?\]/g, (_m, id: string) => `【history:${r.conversationId}:${r.turnId}:${id}】`);
     const originalTimeReferences = [r.user, ...(r.assistant ? [r.assistant] : [])].map((m) => ({
       messageId: m.id, reference: { instant: m.timestamp, timezone: r.timezone ?? memory.reference.timezone }, assumedTimezone: !r.timezone,
-      mentions: (m.content.match(/\b(?:yesterday|today|last Tuesday|last week|\d+ days? ago)\b/gi) ?? []).slice(0, 4).map((expression) => ({
+      // Relative phrases carry an original-message reference. A named date
+      // without a year remains yearless; do not manufacture an event year.
+      mentions: (m.content.match(dateExpressions) ?? []).filter((expression) => /^(?:yesterday|today|last |next |this |\d+ days? ago)/i.test(expression)).slice(0, 4).map((expression) => ({
         expression, result: createTemporalResolver({ referenceInstant: m.timestamp, timezone: r.timezone ?? memory.reference.timezone }).resolve(expression, 'external_event') })),
     }));
     return { ...r, originalTimeReferences, user: { ...r.user, content: qualify(r.user.content) },
@@ -305,7 +361,7 @@ export function memoryData(memory: RetrievedMemory, selected = memory.records) {
 export function prepareAgentContext(memory: RetrievedMemory, query: string, contextWindowTokens: number,
   maxOutputTokens: number): { messages: ModelMessage[]; limitation?: string } {
   const build = (selected: HistoricalRecord[]): ModelMessage[] => [
-    { role: 'system', content: AGENT_SYSTEM_PROMPT },
+    { role: 'system', content: AGENT_SYSTEM_PROMPT + (memory.memoryOnly && memory.groundedRecall ? '\n' + RECALL_OUTPUT_INSTRUCTIONS : '') },
     { role: 'user', content: JSON.stringify({ untrustedHistoricalData: { ...memoryData(memory, selected), contextOmitted: memory.records.length - selected.length } }) },
     { role: 'user', content: query },
   ];

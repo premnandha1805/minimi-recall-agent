@@ -315,7 +315,7 @@ describe('Adversarial Capability Evaluation for Minimi Hiring Challenge', () => 
     });
 
     expect(agentRes.answer).toContain('18 September');
-    expect(agentRes.answer).not.toMatch(/\b202[67]\b/); // No year invented
+    expect(agentRes.answer).not.toMatch(/September 202[67]/); // Sent dates are not event years.
   });
 
   // Scenario 7: Conflicting web evidence and unsupported quotations
