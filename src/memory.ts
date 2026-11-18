@@ -382,4 +382,14 @@ export class ConversationStore {
     await Promise.allSettled([...this.queues.values()]); await this.commitQueue.catch(() => {});
     activeRoots.delete(process.platform === 'win32' ? this.directory.toLowerCase() : this.directory);
   }
+  async diagnostics() {
+    const values = await this.snapshot();
+    const conversations = await Promise.all(values.map(async (value) => ({ id: value.id,
+      title: value.turns[0]?.user.content.slice(0, 80) ?? value.seededMessages[0]?.content.slice(0, 80) ?? 'New conversation',
+      messageCount: value.seededMessages.length + value.turns.reduce((n, t) => n + 1 + t.attempts.filter((a) => a.answer).length, 0),
+      lastUpdated: value.updatedAtUtc, filePath: this.path(value.id), fileSize: (await fs.stat(this.path(value.id))).size })));
+    return { memoryFilePath: this.directory, absolutePath: this.directory,
+      storage: 'per-conversation JSON', fileSize: conversations.reduce((n, c) => n + c.fileSize, 0),
+      conversationCount: conversations.length, messageCount: conversations.reduce((n, c) => n + c.messageCount, 0), conversations };
+  }
 }

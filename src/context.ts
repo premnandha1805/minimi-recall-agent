@@ -13,7 +13,7 @@ export interface HistoricalRecord {
   conversationId: string; turnId: string; ordinal: number; provenance: 'server_recorded' | 'client_seed';
   user: { id: string; content: string; timestamp: string; role?: 'user' | 'assistant' };
   assistant?: { id: string; content: string; timestamp: string };
-  timezone?: string; selection?: 'match' | 'adjacent';
+  timezone?: string; selection?: 'match' | 'adjacent'; score?: number;
   evidence: NonNullable<Conversation['turns'][number]['attempts'][number]['answer']>['evidence'];
 }
 export interface RetrievedMemory {
@@ -23,6 +23,8 @@ export interface RetrievedMemory {
   temporal?: TemporalResult;
   /** Enables the extractive evidence contract for production retrieval. */
   groundedRecall?: boolean;
+  conversationsScanned?: number;
+  messagesScanned?: number;
 }
 const stopWords = new Set(('what did i you we our the a an on in at to from earlier previous past last discuss discussion discussed ask asked tell me ' +
   'which five tools shortlist shortlisted summarize summarise conversation conversations about and of was were with has have changed now current latest ' +
@@ -226,6 +228,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
     }
   }
   const eligible: HistoricalRecord[] = [];
+  memory.conversationsScanned = values.filter((v) => v.id !== options.activeConversationId).length;
   for (const value of values) {
     const current = value.id === options.activeConversationId ? value.turns.find((t) => t.id === options.currentTurnId) : undefined;
     for (const r of records(value)) {
@@ -240,6 +243,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
     }
   }
   // A pronoun can use recent active context as a locator, but never a random
+  memory.messagesScanned = eligible.length;
   // other conversation. Without an active antecedent the matches stay ambiguous.
   if (intent.recall && /\b(?:those|these|that|this|it)\b/i.test(locator)) {
     const active = eligible.filter((r) => r.conversationId === options.activeConversationId).slice(-2);
@@ -311,7 +315,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
     a.record.conversationId.localeCompare(b.record.conversationId) || a.record.ordinal - b.record.ordinal || a.record.turnId.localeCompare(b.record.turnId));
   memory.matches = candidates.length;
   const maximum = intent.recall ? RETRIEVAL_LIMITS.selected : RETRIEVAL_LIMITS.scannedRecords;
-  memory.records = candidates.slice(0, maximum).map((v) => v.record);
+  memory.records = candidates.slice(0, maximum).map((v) => ({ ...v.record, score: v.score }));
   if (candidates.length > maximum) memory.limitation = 'More matching whole turns exist than can be included. Narrow the date or topic.';
   // Only consecutive turns on the same local day can form one discussion. A gap,
   // another conversation, or another day retains ambiguity, regardless of rank.

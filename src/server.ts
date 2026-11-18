@@ -8,7 +8,8 @@ import { type AppConfig, loadConfig } from './config.js';
 import { createExecution, runWithSignal, ExecutionTimeoutError } from './execution.js';
 import { authoritativeHistory, installMemoryHttp } from './memory-http.js';
 import { MemoryError } from './memory.js';
-import { retrieveMemory } from './context.js';
+import { retrieveMemory, recallIntent } from './context.js';
+import { requestStage } from './request-log.js';
 import { runAgent } from './agent.js';
 import { createModelProvider } from './model.js';
 import { createTavilySearch } from './search.js';
@@ -248,7 +249,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
-  const memory = installMemoryHttp(app, options.memoryDirectory);
+  const memory = installMemoryHttp(app, options.memoryDirectory, config.NODE_ENV !== 'production' || process.env.DEBUG_MEMORY === '1');
+  app.addHook('onReady', async () => { app.log.info({ stage: 'memory_startup', pid: process.pid,
+    cwd: process.cwd(), absolutePath: resolve(options.memoryDirectory ?? '.recall-data') }, 'Memory storage ready'); });
   app.post('/api/chat', async (request, reply) => memory.track((async () => {
     const contentType = request.headers['content-type'];
     if (contentType && !contentType.toLowerCase().includes('application/json')) {
@@ -296,6 +299,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     request.executionSignal.throwIfAborted();
     const conversation = await store.resolveClientConversation(parsed.data.conversationId ?? randomUUID(), parsed.data.timezone);
     const conversationId = parsed.data.conversationId ?? conversation.id;
+    requestStage(request, conversation.id, 'request_received', request.executionStartedAt, { clientConversationId: conversationId });
     if (memory.executing.has(conversation.id)) throw new MemoryError('CONFLICT');
     memory.executing.add(conversation.id);
     let turnId: string | undefined;
@@ -309,6 +313,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       const turn = await store.addTurn(conversation.id, { key: parsed.data.turn?.key ?? randomUUID(),
         content: parsed.data.message, timezone: parsed.data.timezone ?? conversation.timezone ?? 'UTC' });
       turnId = turn.id;
+      const persisted = await store.diagnostics();
+      requestStage(request, conversation.id, 'user_message_persisted', request.executionStartedAt,
+        { conversationCount: persisted.conversationCount, messageCount: persisted.messageCount, absolutePath: store.directory });
       const attempt = await store.startAttempt(conversation.id, turn.id, parsed.data.turn?.attemptKey ?? randomUUID());
       attemptId = attempt.id;
       request.executionSignal.throwIfAborted();
@@ -337,22 +344,44 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         await stream.ready();
         const owner = stream;
         const { turn: _turn, ...agentInput } = parsed.data;
+        const retrievalStarted = performance.now();
+        const intent = recallIntent(turn.user.content);
+        requestStage(request, conversation.id, 'recall_intent', retrievalStarted,
+          { detected: intent.recall, memoryOnly: intent.memoryOnly, why: intent.recall ? 'lexical recall cue' : 'no recognized recall cue' });
         const historical = await retrieveMemory(store, { query: turn.user.content, activeConversationId: conversation.id, currentTurnId: turn.id,
           referenceInstant: turn.user.timestamp, timezone: turn.timezone ?? conversation.timezone ?? 'UTC',
           signal: request.executionSignal, startedAt: request.executionStartedAt, deadlineMs: config.REQUEST_DEADLINE_MS });
+        requestStage(request, conversation.id, 'retrieval', retrievalStarted, { conversationsScanned: historical.conversationsScanned,
+          messagesScanned: historical.messagesScanned, status: historical.status,
+          hits: historical.records.map((r) => ({ score: r.score, conversationId: r.conversationId, preview: r.user.content.slice(0, 80) })) });
         const history = authoritativeHistory((await store.load(conversation.id))!, parsed.data.history ?? [], turn.ordinal);
         request.executionSignal.throwIfAborted();
         const result = await runAgent({ ...agentInput, history, message: turn.user.content }, {
           memory: historical,
           provider: { contextWindowTokens: provider.contextWindowTokens, complete: async (input) => {
-            await owner.progress('model_started'); input.signal.throwIfAborted(); return provider.complete(input);
+            const started = performance.now();
+            const characters = input.messages.reduce((n, m) => n + m.content.length, 0);
+            requestStage(request, conversation.id, 'context_built', started, { characters, tokenEstimate: Math.ceil(characters / 4) });
+            requestStage(request, conversation.id, 'model_call_start', started);
+            try {
+              await owner.progress('model_started'); input.signal.throwIfAborted();
+              const response = await provider.complete(input);
+              requestStage(request, conversation.id, 'model_call_end', started, { errorCode: null, errorMessage: null });
+              return response;
+            } catch (error) {
+              requestStage(request, conversation.id, 'model_call_end', started, { errorCode: input.signal.aborted ? 'TIMEOUT_OR_ABORT' : 'MODEL_FAILED',
+                errorMessage: input.signal.aborted ? 'Model deadline or cancellation' : 'Provider operation failed' });
+              throw error;
+            }
           } },
           search: async (query, input) => {
-            await owner.progress('search_started'); input.signal.throwIfAborted(); return search(query, input);
+            const started = performance.now(); requestStage(request, conversation.id, 'web_search_start', started);
+            try { await owner.progress('search_started'); input.signal.throwIfAborted(); return await search(query, input); }
+            finally { requestStage(request, conversation.id, 'web_search_end', started); }
           },
           signal: request.executionSignal, startedAt: request.executionStartedAt,
           deadlineMs: config.REQUEST_DEADLINE_MS,
-          observe: (event) => request.log.info({ requestId: request.id, ...event }, 'Agent stage completed'),
+          observe: (event) => request.log.info({ requestId: request.id, conversationId: conversation.id, ...event }, 'Agent stage completed'),
         });
         if (result.reason === 'answer') {
           const answer = ChatResultSchema.parse({
@@ -367,10 +396,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
           awaitingReceipt = true;
           request.executionSignal.throwIfAborted();
           stream.complete(saved.answer!.result);
+          requestStage(request, conversation.id, 'response_sent', request.executionStartedAt, { outcome: 'answer' });
         } else {
           await store.stopAttempt(conversation.id, turn.id, attempt.id,
             result.reason === 'cancelled' ? 'cancelled' : 'failed', result.reason === 'deadline' || result.reason === 'model_timeout' ? 'TIMEOUT' : 'MODEL_FAILED');
           stream.fail(agentErrorCode(result.reason));
+          requestStage(request, conversation.id, 'response_sent', request.executionStartedAt, { outcome: result.reason });
         }
       } catch (error) {
         if (error instanceof ExecutionTimeoutError) storageFailure = 'TIMEOUT';

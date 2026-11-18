@@ -43,7 +43,7 @@ export function allowLocalMemory(request: FastifyRequest): boolean {
   } catch { return false; }
 }
 
-export function installMemoryHttp(app: FastifyInstance, directory?: string) {
+export function installMemoryHttp(app: FastifyInstance, directory?: string, debug = process.env.NODE_ENV !== 'production' || process.env.DEBUG_MEMORY === '1') {
   let pendingStore: Promise<ConversationStore> | undefined;
   const jobs = new Set<Promise<unknown>>();
   const getStore = () => pendingStore ??= ConversationStore.open({ directory });
@@ -55,12 +55,13 @@ export function installMemoryHttp(app: FastifyInstance, directory?: string) {
     if (pendingStore) { const store = await pendingStore.catch(() => undefined); await store?.close(); }
   });
   app.addHook('onRequest', async (request, reply) => {
-    if (request.url.split('?')[0].startsWith('/api/conversations') || request.url.split('?')[0] === '/api/chat') {
+    if (request.url.split('?')[0].startsWith('/api/conversations') || request.url.split('?')[0] === '/api/chat' || request.url.split('?')[0] === '/api/debug/memory') {
       reply.header('Cache-Control', 'no-store');
       if (!allowLocalMemory(request)) return reply.code(403).send({ error: { code: 'LOCAL_ACCESS_REQUIRED',
         message: 'Local same-origin access is required.' }, requestId: request.id });
     }
   });
+  if (debug) app.get('/api/debug/memory', async () => (await getStore()).diagnostics());
   app.post('/api/conversations', async (request, reply) => {
     valid(z.strictObject({}), request.body ?? {});
     return reply.code(201).send(await (await getStore()).create());
