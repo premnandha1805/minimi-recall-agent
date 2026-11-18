@@ -218,7 +218,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
     if (performance.now() - options.startedAt >= options.deadlineMs) throw new ExecutionTimeoutError();
   };
   const generic = !!options.alwaysRetrieve && isGenericMemoryQuestion(options.query);
-  const intent = options.alwaysRetrieve ? requestRecallIntent(options.query) : recallIntent(options.query);
+  let intent = options.alwaysRetrieve ? requestRecallIntent(options.query) : recallIntent(options.query);
   const memory: RetrievedMemory = { ...intent, reference: { instant: options.referenceInstant, timezone: options.timezone }, status: 'not_found', records: [], matches: 0, groundedRecall: true };
   const values: Conversation[] = [];
   if (options.alwaysRetrieve && store.snapshot) {
@@ -227,6 +227,10 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
     memory.conversationsScanned = values.filter((v) => v.id !== options.activeConversationId).length;
     memory.earlierConversationCount = memory.conversationsScanned;
     memory.messagesScanned = values.reduce((n, v) => n + v.seededMessages.length + v.turns.length, 0);
+    if (/^continue\b/i.test(options.query) && !dateHint(options.query) && values.some((v) => v.id === options.activeConversationId &&
+        v.turns.some((t) => t.id !== options.currentTurnId && Date.parse(t.user.timestamp) <= Date.parse(options.referenceInstant)))) {
+      intent = { recall: false, memoryOnly: false }; Object.assign(memory, intent);
+    }
   }
   memory.reference.localTime = new Intl.DateTimeFormat('en-GB', { timeZone: options.timezone, dateStyle: 'full', timeStyle: 'long' }).format(new Date(options.referenceInstant));
   const locator = historicalLocator(options.query);
