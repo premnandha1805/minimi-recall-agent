@@ -174,3 +174,22 @@ export function createTemporalResolver(options: { timezone: string } &
   };
   return Object.freeze({ reference, resolve });
 }
+
+/** Event-only interpretation of a yearless day/month, relative to when it was
+ * said. Conversation-date lookup keeps its separate most-recent-past rule. The
+ * chosen occurrence is a hint, never a claim that the user supplied that year. */
+export function resolveYearlessEvent(expression: string, reference: TemporalReference): TemporalResult {
+  if (!namedDate.test(expression) || /\b\d{4}\b/.test(expression)) {
+    return createTemporalResolver({ referenceInstant: reference.instant, timezone: reference.timezone }).resolve(expression, 'external_event');
+  }
+  if (!isValidTimeZone(reference.timezone) || !stamp.safeParse(reference.instant).success) return { status: 'invalid', reason: 'reference' };
+  const year = Number(new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone: reference.timezone }).format(new Date(reference.instant)));
+  const parsed = en.strict.parse(expression, { instant: new Date('2000-01-01T12:00:00Z'), timezone: 0 })[0];
+  if (!parsed) return { status: 'unsupported', reason: 'invalid_date' };
+  const resolver = createTemporalResolver({ referenceInstant: reference.instant, timezone: reference.timezone });
+  const candidates = Array.from({ length: 9 }, (_, i): Day => ({ year: year - 4 + i,
+    month: parsed.start.get('month')!, day: parsed.start.get('day')! })).filter(validDay);
+  candidates.sort((a, b) => Math.abs(ordinal(a) * CALENDAR_DAY - Date.parse(reference.instant)) -
+    Math.abs(ordinal(b) * CALENDAR_DAY - Date.parse(reference.instant)) || ordinal(a) - ordinal(b));
+  return candidates[0] ? resolver.resolve(label(candidates[0]), 'external_event') : { status: 'unsupported', reason: 'invalid_date' };
+}

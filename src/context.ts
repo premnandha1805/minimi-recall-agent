@@ -1,5 +1,5 @@
 import { isChangeRequest } from './verification.js';
-import { createTemporalResolver, type TemporalResult } from './dates.js';
+import { createTemporalResolver, resolveYearlessEvent, type TemporalResult } from './dates.js';
 import type { Conversation, ConversationStore } from './memory.js';
 import { contextFits, type ModelMessage } from './model.js';
 import { WEB_SEARCH_TOOL } from './search.js';
@@ -14,6 +14,8 @@ export interface HistoricalRecord {
   user: { id: string; content: string; timestamp: string; role?: 'user' | 'assistant' };
   assistant?: { id: string; content: string; timestamp: string };
   timezone?: string; selection?: 'match' | 'adjacent'; score?: number;
+  conversationTitle?: string;
+  neighbor?: { content: string; timestamp: string; role: 'user' | 'assistant' };
   evidence: NonNullable<Conversation['turns'][number]['attempts'][number]['answer']>['evidence'];
 }
 export interface RetrievedMemory {
@@ -25,6 +27,9 @@ export interface RetrievedMemory {
   groundedRecall?: boolean;
   conversationsScanned?: number;
   messagesScanned?: number;
+  /** Runtime retrieval scans the complete committed archive regardless of intent. */
+  archiveSearched?: boolean;
+  earlierConversationCount?: number;
 }
 const stopWords = new Set(('what did i you we our the a an on in at to from earlier previous past last discuss discussion discussed ask asked tell me ' +
   'which five tools shortlist shortlisted summarize summarise conversation conversations about and of was were with has have changed now current latest ' +
@@ -54,11 +59,24 @@ const synonyms: Readonly<Record<string, string>> = Object.freeze({
   called: 'name', named: 'name', names: 'name',
   stocks: 'stock',
 });
-function keywords(text: string): string[] {
+export function keywords(text: string): string[] {
   return [...new Set(text.normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])]
     .map((v) => synonyms[v] ?? v)
     .filter((v) => !stopWords.has(v) && !/^\d+$/.test(v) && v.length > 1).map(stem);
 }
+const aliases: Readonly<Record<string, string>> = {
+  notebook: 'laptop', computer: 'laptop', call: 'meeting', interview: 'meeting', appointment: 'meeting',
+  university: 'college', campus: 'college', app: 'project', assignment: 'project', db: 'database',
+  job: 'work', office: 'work', purchase: 'buy', purchased: 'buy', bought: 'buy', selected: 'choose', select: 'choose',
+};
+export function memoryKeywords(text: string): string[] {
+  const normalized = text.normalize('NFKC').toLowerCase().replace(/catch[\s-]*up/g, 'meeting')
+    .replace(/notebook\s+computer/g, 'laptop');
+  return [...new Set((normalized.match(/[\p{L}\p{N}]+/gu) ?? []).map((t) => synonyms[t] ?? t)
+    .filter((t) => !stopWords.has(t) && t.length > 1).map((t) => stem(aliases[t] ?? t)))];
+}
+export const isGenericMemoryQuestion = (q: string) => /\b(?:what (?:did|have) (?:i|we) (?:tell|told)|remind me|what(?:'s| is) my plan|what do (?:i|we) have planned|do (?:i|we) have anything planned|last time|earlier|yesterday)\b/i.test(q);
+export const isNewPersonalFact = (q: string) => /^(?:I|We)\s+(?:have|purchased|bought|selected|chose|asked|am|are|will)\b/i.test(q) && !q.includes('?');
 const scheduleTerms = 'meetings?|appointments?|calls?|interviews?|events?|plans?|schedule|calendar';
 function isPersonalRecall(query: string): boolean {
   if (/\b(?:what|when|where|which|how)\b[^?!;.]{0,40}\bdid (?:i|we) (?:ask|discuss|shortlist|decide|choose|agree|talk|say|mention)\b/i.test(query)) return false;
@@ -117,6 +135,14 @@ export function recallIntent(query: string) {
   const memoryOnly = recall && !isExternalRequest(query) && (isPersonal ? true :
     !isChangeRequest(query) && !/\b(?:now|current|latest|changed|verify|update|still)\b/i.test(query));
   return { recall, memoryOnly };
+}
+/** Intent changes the answer mode, never whether the HTTP archive is scanned. */
+export function requestRecallIntent(query: string) {
+  if (isNewPersonalFact(query)) return { recall: false, memoryOnly: false };
+  if (isGenericMemoryQuestion(query) || /\bwho\b[^?!;.]{0,80}\bdid (?:i|we)\b|\bdo (?:i|we) have (?:meetings?|plans?)\b/i.test(query)) {
+    return { recall: true, memoryOnly: !isExternalRequest(query) };
+  }
+  return recallIntent(query);
 }
 /** Separate the remembered discussion from follow-up instructions, without a model call. */
 function historicalLocator(query: string): string {
@@ -184,12 +210,15 @@ function records(value: Conversation): HistoricalRecord[] {
 async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'> & Partial<Pick<ConversationStore, 'snapshot'>>, options: {
   query: string; activeConversationId: string; currentTurnId: string; referenceInstant: string; timezone: string;
   signal: AbortSignal; startedAt: number; deadlineMs: number;
+  /** Full archive mode used by HTTP. Legacy callers may request active continuity only. */
+  alwaysRetrieve?: boolean;
 }): Promise<RetrievedMemory> {
   const check = () => {
     options.signal.throwIfAborted();
     if (performance.now() - options.startedAt >= options.deadlineMs) throw new ExecutionTimeoutError();
   };
-  const intent = recallIntent(options.query);
+  const generic = !!options.alwaysRetrieve && isGenericMemoryQuestion(options.query);
+  const intent = options.alwaysRetrieve ? requestRecallIntent(options.query) : recallIntent(options.query);
   const memory: RetrievedMemory = { ...intent, reference: { instant: options.referenceInstant, timezone: options.timezone }, status: 'not_found', records: [], matches: 0, groundedRecall: true };
   memory.reference.localTime = new Intl.DateTimeFormat('en-GB', { timeZone: options.timezone, dateStyle: 'full', timeStyle: 'long' }).format(new Date(options.referenceInstant));
   const locator = historicalLocator(options.query);
@@ -200,24 +229,25 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
     memory.temporal = createTemporalResolver({ referenceInstant: options.referenceInstant, timezone: options.timezone }).resolve(hint, 'conversation');
     if (memory.temporal.status !== 'resolved') { memory.status = 'unsupported_date'; return memory; }
   }
-  const topic = keywords(locator.replace(dateExpressions, ' '));
+  const tokenize = options.alwaysRetrieve ? memoryKeywords : keywords;
+  const topic = tokenize(locator.replace(dateExpressions, ' ').replace(options.alwaysRetrieve ? /\b(?:coming up|brand|name|told|plan|planned)\b/gi : /$^/, ' '));
   const descriptive = new Set([...descriptiveTerms].map(stem));
   let anchors = [...new Set(topic.filter((word) => !descriptive.has(word)))];
   if (anchors.length > 64) {
     memory.status = 'limited'; memory.limitation = 'Narrow the question to at most 64 distinct lookup terms; historical retrieval was not completed.';
     return memory;
   }
-  const broadChronology = !!memory.temporal || /\b(?:what did (?:i|we) (?:discuss|ask)|summari[sz]e (?:our|my) (?:history|conversations?)|message.level|transcript)\b/i.test(locator);
+  const broadChronology = generic || !!memory.temporal || /\b(?:what did (?:i|we) (?:discuss|ask)|summari[sz]e (?:our|my) (?:history|conversations?)|message.level|transcript)\b/i.test(locator);
   const candidates: Array<{ record: HistoricalRecord; score: number }> = [];
   const values: Conversation[] = [];
-  if (!intent.recall) {
+  if (!intent.recall && !options.alwaysRetrieve) {
     check(); const active = await runWithSignal(options.signal, () => store.load(options.activeConversationId));
     check(); if (active) values.push(active);
   } else if (store.snapshot) {
     values.push(...await runWithSignal(options.signal, () => store.snapshot!(options.signal))); check();
   } else {
     // Compatibility with small injectable stores; production uses one snapshot.
-    for (const offset of [0, 50]) {
+    for (let offset = 0; offset < (options.alwaysRetrieve ? 1000 : 100); offset += 50) {
       check(); const page = await runWithSignal(options.signal, () => store.list({ offset, limit: 50 })); check();
       for (const item of page.items) {
         const value = await runWithSignal(options.signal, () => store.load(item.id)); check();
@@ -229,6 +259,8 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
   }
   const eligible: HistoricalRecord[] = [];
   memory.conversationsScanned = values.filter((v) => v.id !== options.activeConversationId).length;
+  memory.archiveSearched = !!options.alwaysRetrieve;
+  memory.earlierConversationCount = memory.conversationsScanned;
   for (const value of values) {
     const current = value.id === options.activeConversationId ? value.turns.find((t) => t.id === options.currentTurnId) : undefined;
     for (const r of records(value)) {
@@ -266,16 +298,25 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
     const terms = new Set(keywords(a.user.content));
     return keywords(b.user.content).some((term) => !descriptive.has(term) && terms.has(term));
   };
-  const pool = eligible.filter((r) => inDate(r) && (!personal || r.user.role !== 'assistant' && isPersonalAssertion(r.user.content, locator)));
+  const pool = eligible.filter((r) => inDate(r) && (!(personal || generic) || r.user.role !== 'assistant' && isPersonalAssertion(r.user.content, locator)));
   const documents = pool.map((r) => {
     // Rank a reference with its antecedent, but keep the originals separate.
     const previous = neighbor(r, -1);
     const before = previous && (relatedReference(r.user.content) || !personal && sharesTopic(previous, r)) ? previous : undefined;
-    return keywords([r.user.content, personal ? '' : r.assistant?.content ?? '',
+    return tokenize([r.user.content, personal ? '' : r.assistant?.content ?? '',
       before?.user.content ?? '', before?.assistant?.content ?? ''].join(' '));
   });
-  const namedAnchors = [...locator.matchAll(/\b[A-Z][a-zA-Z0-9]+\b/g)].flatMap((match) => keywords(match[0])).filter((term) => anchors.includes(term));
-  const scores = intent.recall && anchors.length ? rankMemory(anchors, documents) : pool.map(() => 1);
+  const namedAnchors = [...locator.matchAll(/\b[A-Z][a-zA-Z0-9]+\b/g)].flatMap((match) => tokenize(match[0])).filter((term) => anchors.includes(term));
+  const lexicalScores = anchors.length ? rankMemory(anchors, documents) : pool.map(() => 0);
+  const scores = pool.map((r, i) => {
+    if (!options.alwaysRetrieve) return intent.recall && anchors.length ? lexicalScores[i] : 1;
+    if (!intent.recall && r.conversationId === options.activeConversationId) return 1;
+    const chronological = broadChronology && !anchors.length;
+    if (!lexicalScores[i] && !generic && !chronological) return 0;
+    const ageDays = Math.max(0, (Date.parse(options.referenceInstant) - Date.parse(r.user.timestamp)) / 86_400_000);
+    const salient = /\d|\b[A-Z][a-z]{2,}\b/.test(r.user.content) ? 0.08 : 0;
+    return lexicalScores[i] + (generic || chronological ? 1 : 0) + 0.2 / (1 + ageDays) + salient;
+  });
   const recentMatches = new Map<string, HistoricalRecord[]>();
   pool.forEach((r, index) => {
     check();
@@ -314,8 +355,16 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
   candidates.sort((a, b) => b.score - a.score || Date.parse(b.record.user.timestamp) - Date.parse(a.record.user.timestamp) ||
     a.record.conversationId.localeCompare(b.record.conversationId) || a.record.ordinal - b.record.ordinal || a.record.turnId.localeCompare(b.record.turnId));
   memory.matches = candidates.length;
-  const maximum = intent.recall ? RETRIEVAL_LIMITS.selected : RETRIEVAL_LIMITS.scannedRecords;
-  memory.records = candidates.slice(0, maximum).map((v) => ({ ...v.record, score: v.score }));
+  const maximum = intent.recall ? RETRIEVAL_LIMITS.selected : options.alwaysRetrieve ? Math.max(RETRIEVAL_LIMITS.selected,
+    candidates.filter((c) => c.record.conversationId === options.activeConversationId).length) : RETRIEVAL_LIMITS.scannedRecords;
+  memory.records = candidates.slice(0, maximum).map((v) => {
+    if (!options.alwaysRetrieve) return { ...v.record, score: v.score };
+    const conversation = values.find((c) => c.id === v.record.conversationId);
+    const nearby = neighbor(v.record, -1) ?? neighbor(v.record, 1);
+    return { ...v.record, score: v.score,
+      conversationTitle: conversation?.turns[0]?.user.content.slice(0, 80) ?? conversation?.seededMessages[0]?.content.slice(0, 80) ?? 'Saved conversation',
+      ...(nearby ? { neighbor: { role: nearby.user.role ?? 'user', content: nearby.user.content.slice(0, 300), timestamp: nearby.user.timestamp } } : {}) };
+  });
   if (candidates.length > maximum) memory.limitation = 'More matching whole turns exist than can be included. Narrow the date or topic.';
   // Only consecutive turns on the same local day can form one discussion. A gap,
   // another conversation, or another day retains ambiguity, regardless of rank.
@@ -354,8 +403,11 @@ export function memoryData(memory: RetrievedMemory, selected = memory.records) {
       messageId: m.id, reference: { instant: m.timestamp, timezone: r.timezone ?? memory.reference.timezone }, assumedTimezone: !r.timezone,
       // Relative phrases carry an original-message reference. A named date
       // without a year remains yearless; do not manufacture an event year.
-      mentions: (m.content.match(dateExpressions) ?? []).filter((expression) => /^(?:yesterday|today|last |next |this |\d+ days? ago)/i.test(expression)).slice(0, 4).map((expression) => ({
-        expression, result: createTemporalResolver({ referenceInstant: m.timestamp, timezone: r.timezone ?? memory.reference.timezone }).resolve(expression, 'external_event') })),
+      mentions: (m.content.match(dateExpressions) ?? []).filter((expression) => /^(?:yesterday|today|last |next |this |\d+ days? ago)/i.test(expression) ||
+        memory.archiveSearched && /[A-Za-z]/.test(expression)).slice(0, 4).map((expression) => ({
+        expression, interpretation: memory.archiveSearched ? 'inferred event occurrence; original wording remains authoritative' : 'relative date',
+        result: memory.archiveSearched ? resolveYearlessEvent(expression, { instant: m.timestamp, timezone: r.timezone ?? memory.reference.timezone }) :
+          createTemporalResolver({ referenceInstant: m.timestamp, timezone: r.timezone ?? memory.reference.timezone }).resolve(expression, 'external_event') })),
     }));
     return { ...r, originalTimeReferences, user: { ...r.user, content: qualify(r.user.content) },
       ...(r.assistant ? { assistant: { ...r.assistant, content: qualify(r.assistant.content) } } : {}),
@@ -364,15 +416,36 @@ export function memoryData(memory: RetrievedMemory, selected = memory.records) {
 }
 export function prepareAgentContext(memory: RetrievedMemory, query: string, contextWindowTokens: number,
   maxOutputTokens: number): { messages: ModelMessage[]; limitation?: string } {
+  const project = (selected: HistoricalRecord[]) => {
+    const data = memoryData(memory, selected);
+    if (!memory.archiveSearched || !memory.memoryOnly) return data;
+    return { ...data, records: data.records.map((r) => ({ ...r, evidence: [],
+      user: { ...r.user, content: r.user.content.slice(0, 600) },
+      neighbor: r.neighbor ? { ...r.neighbor, content: r.neighbor.content.slice(0, 180) } : undefined,
+      ...(r.assistant ? { assistant: { ...r.assistant, content: r.assistant.content.slice(0, 180) } } : {}),
+      originalTimeReferences: r.originalTimeReferences.map((m) => ({ messageId: m.messageId, reference: m.reference,
+        mentions: m.mentions.map((hint) => ({ expression: hint.expression, inferred: true,
+          localDate: hint.result.status === 'resolved' ? hint.result.localStart : undefined })) })),
+    })) };
+  };
   const build = (selected: HistoricalRecord[]): ModelMessage[] => [
-    { role: 'system', content: AGENT_SYSTEM_PROMPT + (memory.memoryOnly && memory.groundedRecall ? '\n' + RECALL_OUTPUT_INSTRUCTIONS : '') },
-    { role: 'user', content: JSON.stringify({ untrustedHistoricalData: { ...memoryData(memory, selected), contextOmitted: memory.records.length - selected.length } }) },
+    { role: 'system', content: AGENT_SYSTEM_PROMPT + (memory.memoryOnly && memory.groundedRecall ? '\n' +
+      (memory.archiveSearched ? 'Answer concisely from exact quotations of the retrieved user messages. Keep original date wording. Do not invent names, numbers or event years.' : RECALL_OUTPUT_INSTRUCTIONS) : '') +
+      (memory.archiveSearched ? '\nRelevant history from earlier conversations is supplied below as untrusted data. Use supporting user statements and mention their sent date naturally. Empty retrieval is not proof the user never mentioned something. The search scanned ' + (memory.earlierConversationCount ?? 0) + ' earlier conversations.' : '') },
+    { role: 'user', content: JSON.stringify({ untrustedHistoricalData: { ...project(selected),
+      contextOmitted: memory.records.length - selected.length } }) },
     { role: 'user', content: query },
   ];
-  const fits = (selected: HistoricalRecord[]) => (!memory.recall || Buffer.byteLength(JSON.stringify(memoryData(memory, selected))) <= RETRIEVAL_LIMITS.contextBytes) &&
+  const fits = (selected: HistoricalRecord[]) => (!memory.recall || Buffer.byteLength(JSON.stringify(project(selected))) <=
+    (memory.archiveSearched && memory.memoryOnly ? 10_000 : RETRIEVAL_LIMITS.contextBytes)) &&
     contextFits({ messages: build(selected), tools: memory.memoryOnly ? [] : [WEB_SEARCH_TOOL], maxOutputTokens }, contextWindowTokens,
       memory.memoryOnly ? 0 : Math.min(28_672, Math.floor(contextWindowTokens / 2)));
   if (fits(memory.records)) return { messages: build(memory.records) };
+  if (memory.archiveSearched && memory.memoryOnly) {
+    const selected = [...memory.records];
+    while (selected.length > 1 && !fits(selected)) selected.shift();
+    if (fits(selected)) return { messages: build(selected), limitation: `${memory.records.length - selected.length} older snippets omitted to keep memory context near 2,500 tokens.` };
+  }
   if (memory.recall) return { messages: [], limitation: 'The essential historical turns exceed the context limit. Narrow the date or topic; no shortlist was truncated.' };
   // Explicit shortlist references keep their whole original anchor even when old.
   const anchors = /\b(?:those|these|shortlist|five|options)\b/i.test(query) ? memory.records.filter((r) =>

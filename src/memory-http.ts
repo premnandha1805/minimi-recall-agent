@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import fs from 'node:fs/promises';
+import { resolve } from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ConversationStore, MemoryError, type Conversation } from './memory.js';
@@ -43,10 +45,21 @@ export function allowLocalMemory(request: FastifyRequest): boolean {
   } catch { return false; }
 }
 
-export function installMemoryHttp(app: FastifyInstance, directory?: string, debug = process.env.NODE_ENV !== 'production' || process.env.DEBUG_MEMORY === '1') {
+export function installMemoryHttp(app: FastifyInstance, directory?: string, debug = process.env.NODE_ENV !== 'production' || process.env.DEBUG_MEMORY === '1', migrateLegacy = false) {
   let pendingStore: Promise<ConversationStore> | undefined;
   const jobs = new Set<Promise<unknown>>();
-  const getStore = () => pendingStore ??= ConversationStore.open({ directory });
+  const getStore = () => pendingStore ??= (async () => {
+    if (migrateLegacy && directory) {
+      const legacy = resolve(import.meta.dirname, '..', '.recall-data');
+      try { await fs.access(directory); }
+      catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+        try { await fs.cp(legacy, directory, { recursive: true, force: false, errorOnExist: true }); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      }
+    }
+    return ConversationStore.open({ directory, cachedSnapshots: true, recoverCorrupt: true, maxConversations: 1000 });
+  })();
   const track = <T>(job: Promise<T>) => {
     jobs.add(job); void job.finally(() => jobs.delete(job)).catch(() => {}); return job;
   };
@@ -67,7 +80,7 @@ export function installMemoryHttp(app: FastifyInstance, directory?: string, debu
     return reply.code(201).send(await (await getStore()).create());
   });
   app.get('/api/conversations', async (request) => {
-    const query = valid(z.strictObject({ offset: z.coerce.number().int().min(0).max(100).optional(),
+    const query = valid(z.strictObject({ offset: z.coerce.number().int().min(0).max(1000).optional(),
       limit: z.coerce.number().int().min(1).max(50).optional() }), request.query);
     return (await getStore()).list(query);
   });

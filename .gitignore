@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 .recall-data/
+.data/
 *.tsbuildinfo
 
 # Environment secrets
