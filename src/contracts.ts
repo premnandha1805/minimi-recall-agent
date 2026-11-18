@@ -131,6 +131,7 @@ export const ChatResultSchema = z.strictObject({
   sources: z.array(SourceMetadataSchema).max(24),
   evidenceCheck: z.literal('citation_ids_only'),
   memory: z.strictObject({ earlierConversations: z.number().int().min(0).max(1000), fallback: z.boolean() }).optional(),
+  generation: z.strictObject({ origin: z.enum(['model', 'recovered']) }).optional(),
 }).superRefine((value, ctx) => {
   const ids = new Set(value.sources.map((s) => s.id));
   if (ids.size !== value.sources.length || new Set(value.issues).size !== value.issues.length ||

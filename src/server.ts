@@ -8,7 +8,7 @@ import { type AppConfig, loadConfig } from './config.js';
 import { createExecution, runWithSignal, ExecutionTimeoutError } from './execution.js';
 import { authoritativeHistory, installMemoryHttp } from './memory-http.js';
 import { MemoryError } from './memory.js';
-import { retrieveMemory, requestRecallIntent, isExternalRequest, isNewPersonalFact } from './context.js';
+import { retrieveMemory, requestRecallIntent } from './context.js';
 import { requestStage } from './request-log.js';
 import type { StageObservation } from './observability.js';
 import { runAgent } from './agent.js';
@@ -16,7 +16,7 @@ import { createModelProvider } from './model.js';
 import type { ModelProvider } from './model.js';
 import { modelFailureDiagnostic } from './model.js';
 import { createStreamingModelProvider } from './streaming-model.js';
-import { createTavilySearch, SearchSession, type WebSearch } from './search.js';
+import { createTavilySearch, type WebSearch } from './search.js';
 import { SseResponse, agentErrorCode } from './sse.js';
 import {
   APP_NAME,
@@ -369,21 +369,16 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         const intent = requestRecallIntent(turn.user.content);
         requestStage(request, conversation.id, 'recall_intent', retrievalStarted,
           { detected: intent.recall, memoryOnly: intent.memoryOnly, why: intent.recall ? 'lexical recall cue' : 'no recognized recall cue' });
-        const liveResearch = !options.fetchImpl && !isNewPersonalFact(turn.user.content) &&
-          (isExternalRequest(turn.user.content) || /\b(?:research|search|look up|recommend)\b/i.test(turn.user.content));
         const measuredSearch = async (query: string, input: Parameters<typeof search>[1]) => {
           const started = performance.now(); requestStage(request, conversation.id, 'web_search_start', started);
-          try { await owner.progress(liveResearch ? 'research_started' : 'search_started'); input.signal.throwIfAborted(); return await search(query, input); }
+          try { await owner.progress('search_started'); input.signal.throwIfAborted(); return await search(query, input); }
           finally { requestStage(request, conversation.id, 'web_search_end', started); }
         };
-        const prefetchedSearch = liveResearch ? new SearchSession(measuredSearch, request.executionSignal,
-          request.executionStartedAt, (event) => request.log.info({ requestId: request.id, conversationId: conversation.id, ...event }, 'Agent stage completed'), turn.user.content) : undefined;
-        const researchPromise = prefetchedSearch?.runRound([[turn.user.content.slice(0, 500)]]) ?? Promise.resolve([]);
         let retrievalDurationMs = 0;
-        const [historical, prefetchedOutcomes] = await Promise.all([retrieveMemory(store, { query: turn.user.content, activeConversationId: conversation.id, currentTurnId: turn.id,
+        const historical = await retrieveMemory(store, { query: turn.user.content, activeConversationId: conversation.id, currentTurnId: turn.id,
           referenceInstant: turn.user.timestamp, timezone: turn.timezone ?? conversation.timezone ?? 'UTC',
           signal: request.executionSignal, startedAt: request.executionStartedAt, deadlineMs: config.REQUEST_DEADLINE_MS, alwaysRetrieve: true })
-          .then((value) => { retrievalDurationMs = performance.now() - retrievalStarted; return value; }), researchPromise]);
+          .then((value) => { retrievalDurationMs = performance.now() - retrievalStarted; return value; });
         requestStage(request, conversation.id, 'retrieval', retrievalStarted, { conversationsScanned: historical.conversationsScanned,
           durationMs: Math.round(retrievalDurationMs * 100) / 100,
           messagesScanned: historical.messagesScanned, status: historical.status,
@@ -393,9 +388,6 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         request.executionSignal.throwIfAborted();
         const result = await runAgent({ ...agentInput, history, message: turn.user.content }, {
           memory: historical,
-          ...(!options.fetchImpl ? { allowWeb: liveResearch } : {}),
-          prefetchedSearch,
-          prefetchedIssues: prefetchedOutcomes.flat().filter((outcome) => !['ok', 'duplicate'].includes(outcome.status)).map((outcome) => `search_${outcome.status}`),
           recoverRecall: !options.fetchImpl || !!options.provider,
           modelTimeoutMs: options.modelTimeoutMs ?? (!options.fetchImpl ? 15_000 : undefined),
           onText: async (text) => { await owner.delta(text); },
@@ -432,7 +424,8 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
             sources: result.sources.map(({ text: _text, ...metadata }) => metadata), evidenceCheck: 'citation_ids_only',
             ...(historical.recall && historical.records.length ? { memory: {
               earlierConversations: new Set(historical.records.filter((r) => r.conversationId !== conversation.id).map((r) => r.conversationId)).size,
-              fallback: !!result.answer?.includes('The model was unavailable;') } } : {}),
+              fallback: result.generationOrigin === 'recovered' } } : {}),
+            ...(result.generationOrigin ? { generation: { origin: result.generationOrigin } } : {}),
           });
           request.executionSignal.throwIfAborted();
           const saved = await store.saveGenerated(conversation.id, turn.id, attempt.id, { result: answer, evidence: result.sources });

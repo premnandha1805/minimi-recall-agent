@@ -177,7 +177,7 @@ export function createModelProvider(config: AppConfig, fetchImpl: typeof fetch =
             model: deployment, messages, stream: false, max_completion_tokens: request.maxOutputTokens,
             ...(request.tools.length ? {
               tools: request.tools.map((tool) => ({ type: 'function', function: tool })), tool_choice: 'auto',
-            } : request.messages.some((m) => m.role === 'tool') ? { tool_choice: 'none' } : {}),
+            } : {}),
           }),
         });
         if (!response.ok) {

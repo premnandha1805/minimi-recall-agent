@@ -8,7 +8,8 @@ import { contextFits, ModelResponseSchema, type ModelMessage, type ModelProvider
 import { AGENT_SYSTEM_PROMPT } from './prompts.js';
 import { abortOutcome, observeStage, sourceCounts, tokenUsage, type StageObserver, type StageOutcome, type ValidationCategory } from './observability.js';
 import { SEARCH_LIMITS, SearchArgumentsSchema, SearchSession, WEB_SEARCH_TOOL, type Source, type WebSearch } from './search.js';
-import { groundedRecallAnswer, groundHistoricalProse } from './recall-answer.js';
+import { evaluateGroundedRecall, groundedRecallAnswer, groundHistoricalProse } from './recall-answer.js';
+import { createResearchPolicy } from './research-policy.js';
 import { modelFailureDiagnostic, type ModelFailureDiagnostic } from './model.js';
 
 /** Select one exact contiguous excerpt; never join separated claims into a quotation. */
@@ -162,6 +163,7 @@ export interface AgentResult {
   status: 'completed' | 'partial' | 'failed' | 'cancelled';
   reason: AgentStopReason;
   answer?: string;
+  generationOrigin?: 'model' | 'recovered';
   sources: Source[];
   issues: string[];
   stats: { modelCalls: number; searchRounds: number; searchRequests: number; reservedOutputTokens: number };
@@ -222,22 +224,31 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
     { role: 'user', content: parsed.data.message },
   ];
   let toolsEnabled = !options.memory?.memoryOnly && options.allowWeb !== false;
+  const researchPolicy = createResearchPolicy(parsed.data.message, options.memory);
+  const changeRequest = !options.memory?.memoryOnly && isChangeRequest(parsed.data.message);
+  // Suppress raw unvalidated tokens for pure recall, mixed recall, and change
+  // comparisons so intermediate JSON or ungrounded historical claims never stream.
+  const suppressRawStream = changeRequest || !!options.memory?.recall || !!options.memory?.memoryOnly;
+  const boundAnswer = (text: string) => text.length > MAX_MESSAGE_CHARS ?
+    'The complete answer exceeds the answer limit. Please narrow the date or topic; no original record or quotation has been truncated.' : text;
   const finish = (reason: AgentStopReason, answer?: string): AgentResult => {
-    if (options.recoverRecall && options.memory?.records.length &&
+    if (options.recoverRecall && options.memory?.memoryOnly && options.memory.records.length &&
         ['model_timeout', 'provider_error', 'empty_output', 'invalid_response', 'output_limit', 'context_limit'].includes(reason) &&
         !options.signal.aborted) {
       reason = 'answer';
+      result.generationOrigin = 'recovered';
       answer = groundedRecallAnswer('{}', options.memory, parsed.data.message) +
-        '\n\nThe model was unavailable; this answer quotes the saved evidence directly.' +
-        (options.memory.memoryOnly ? '' : ' Fresh external information could not be completed.');
+        '\n\nThe model was unavailable; this answer quotes the saved evidence directly.';
+    }
+    if (reason === 'answer' && !result.generationOrigin && result.stats.modelCalls > 0) {
+      result.generationOrigin = 'model';
     }
     result.reason = reason;
     result.status = reason === 'cancelled' ? 'cancelled' :
       reason === 'answer' ? (issues.size ? 'partial' : 'completed') : 'failed';
     // Deterministic originals and appended notices can exceed the model's text
     // limit. Enforce the public answer contract without truncating evidence.
-    if (answer !== undefined) result.answer = answer.length > MAX_MESSAGE_CHARS ?
-      'The complete answer exceeds the answer limit. Please narrow the date or topic; no original record or quotation has been truncated.' : answer;
+    if (answer !== undefined) result.answer = boundAnswer(answer);
     return result;
   };
   const reject = (reason: AgentStopReason, category: ValidationCategory): AgentResult => {
@@ -261,7 +272,6 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       messages = prepared.messages;
       contextLimitation = prepared.limitation;
     }
-    const changeRequest = !options.memory?.memoryOnly && isChangeRequest(parsed.data.message);
     if (changeRequest) messages.splice(1, 0, { role: 'system', content: COMPARISON_INSTRUCTIONS });
     if (options.prefetchedSearch?.sources.length) {
       messages.push({ role: 'user', content: JSON.stringify({ untrustedWebSearchData: options.prefetchedSearch.sources }) });
@@ -292,7 +302,10 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
           result.stats.reservedOutputTokens += maxOutputTokens;
           return options.provider.complete({ messages: structuredClone(messages), tools: structuredClone(tools),
             maxOutputTokens, signal: modelScope.signal, onFirstToken: modelScope.markFirstToken,
-            ...(options.onText ? { onText: async (text) => { modelScope.signal.throwIfAborted(); modelScope.markFirstToken(); await options.onText!(text); } } : {}) });
+            ...(options.onText ? { onText: async (text) => {
+              modelScope.signal.throwIfAborted(); modelScope.markFirstToken();
+              if (!suppressRawStream) await options.onText!(text);
+            } } : {}) });
         });
         deadline.signal.throwIfAborted();
         const validated = ModelResponseSchema.safeParse(raw);
@@ -308,16 +321,27 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
           modelFailure?.httpStatus !== undefined && modelFailure.httpStatus >= 500;
         if (options.recoverRecall && step === 0 && transient &&
             limits.data.deadlineMs - (performance.now() - startedAt) > 1800) {
-          // No LLM classifier/validator: retry this same answer once with less history.
+          // No LLM classifier/validator: retry this same answer once with less history,
+          // preserving comparison rules, historical baselines and any prefetched web evidence.
           const shortened = options.memory ? prepareAgentContext({ ...options.memory,
-            records: options.memory.records.slice(-2).map((r) => ({ ...r, evidence: [], assistant: undefined,
-              user: { ...r.user, content: r.user.content.slice(0, 800) } })) }, parsed.data.message,
+            records: options.memory.records.slice(-2).map((r) => ({ ...r,
+              evidence: changeRequest ? r.evidence : [],
+              assistant: changeRequest ? r.assistant : undefined,
+              user: { ...r.user, content: changeRequest ? r.user.content : r.user.content.slice(0, 800) } })) }, parsed.data.message,
             options.provider.contextWindowTokens, maxOutputTokens).messages : [];
-          if (shortened.length) messages = shortened;
-          else messages = [messages[0], { role: 'user', content: parsed.data.message }];
+          const nextMessages = shortened.length ? shortened : [messages[0], { role: 'user' as const, content: parsed.data.message }];
+          if (changeRequest && !nextMessages.some((m) => m.role === 'system' && m.content === COMPARISON_INSTRUCTIONS)) {
+            nextMessages.splice(1, 0, { role: 'system', content: COMPARISON_INSTRUCTIONS });
+          }
+          const webDataMessages = messages.filter((m) => m.role === 'user' && m.content.startsWith('{"untrustedWebSearchData"'));
+          nextMessages.push(...webDataMessages);
+          if (contextFits({ messages: nextMessages, tools, maxOutputTokens }, options.provider.contextWindowTokens)) {
+            messages = nextMessages;
+          }
           continue;
         }
         if (options.recoverRecall && options.memory?.records.length && options.memory.memoryOnly) {
+          result.generationOrigin = 'recovered';
           return finish('answer', groundedRecallAnswer('{}', options.memory, parsed.data.message) +
             '\n\nThe model was unavailable; this answer quotes the saved evidence directly.');
         }
@@ -355,16 +379,26 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
           'Cannot verify: no supported historical baseline was supplied.';
         else if (/(?<!no )\bconfirmed change\b/i.test(answer)) answer = 'Cannot verify: a change verdict was not established by deterministic evidence comparison.';
         if (!checkSourceQuotations(answer, search.sources)) answer = 'Cannot verify: quotation warning: a cited quotation did not match the exact available source text. No unsupported quotation or change claim is accepted.';
-        if (options.memory?.memoryOnly) answer = options.memory.groundedRecall ? groundedRecallAnswer(response.text, options.memory, parsed.data.message) :
-          validateAndGroundMemoryAnswer(answer, options.memory, parsed.data.message);
-        else if (options.memory?.recall && !changeRequest) {
+        if (options.memory?.memoryOnly) {
+          if (options.memory.groundedRecall) {
+            const evaluated = evaluateGroundedRecall(response.text, options.memory, parsed.data.message);
+            answer = evaluated.answer;
+            result.generationOrigin = evaluated.origin;
+          } else {
+            answer = validateAndGroundMemoryAnswer(answer, options.memory, parsed.data.message);
+          }
+        } else if (options.memory?.recall && !changeRequest) {
           const memory = options.memory;
           answer = groundHistoricalProse(answer, memory, (sentence) => groundMixedMemoryAnswer(sentence, memory));
         }
         if (performance.now() - startedAt >= limits.data.deadlineMs) return finish('deadline');
         deadline.signal.throwIfAborted();
         if (citationIds(answer).some((id) => !knownIds.has(id))) return finish('invalid_citation');
-        return finish('answer', contextLimitation ? `${answer}\n\nContext limitation: ${contextLimitation}` : answer);
+        const finalText = boundAnswer(contextLimitation ? `${answer}\n\nContext limitation: ${contextLimitation}` : answer);
+        if (suppressRawStream && options.onText && finalText) {
+          await options.onText(finalText);
+        }
+        return finish('answer', finalText);
       }
       if (!tools.length) return finish('round_limit');
       if (response.finishReason !== 'tool_calls') return reject('invalid_response', 'finish_tool_mismatch');
@@ -377,7 +411,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
         try { args = JSON.parse(call.arguments); } catch { return reject('invalid_tool_call', 'tool_arguments_json'); }
         const valid = SearchArgumentsSchema.safeParse(args);
         if (!valid.success) return reject('invalid_tool_call', 'tool_arguments_schema');
-        groups.push(valid.data.queries);
+        groups.push(researchPolicy.focus(valid.data.queries));
       }
       messages.push({ role: 'assistant', content: response.text, toolCalls: response.toolCalls });
       const outcomes = await search.runRound(groups);

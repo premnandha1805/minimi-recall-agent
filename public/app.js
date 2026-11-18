@@ -1252,6 +1252,16 @@ export function createChatApp(options = {}) {
             }
           }
         },
+        onDraftReset: () => {
+          if (requestState.controller.signal.aborted || activeRequest?.requestToken !== requestToken) return;
+          const entry = targetSession.entries.find((item) => item.id === loadingEntryId);
+          if (entry?.kind !== 'loading') return;
+          entry.draft = '';
+          if (activeSession.id === targetSession.id) {
+            const draft = messageListEl?.querySelector(`[data-entry-id="${loadingEntryId}"] .streaming-draft`);
+            if (draft) draft.textContent = '';
+          }
+        },
         onProgress: (progress) => {
           if (requestState.controller.signal.aborted || activeRequest?.requestToken !== requestToken) return;
           const entry = targetSession.entries.find((item) => item.id === loadingEntryId);

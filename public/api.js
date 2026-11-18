@@ -463,7 +463,7 @@ async function sendChatRequestInner(payload, options = {}) {
 /** @typedef {import('../src/contracts.js').ChatEventPayloads} ChatEvents */
 /** @typedef {{signal?: AbortSignal, fetchImpl?: typeof fetch, maxHistoryItems?: number,
  * maxBodyBytes?: number, onProgress?: (progress: ChatEvents['progress']) => void,
- * onDelta?: (text: string) => void}} ChatOptions */
+ * onDelta?: (text: string) => void, onDraftReset?: () => void}} ChatOptions */
 
 /** A transport watchdog includes fetch and body reading, without extending the server deadline.
  * @param {ChatRequestPayload} payload @param {ChatOptions} [options]
@@ -543,7 +543,7 @@ export function validChatEvent(event, v) {
     case 'done': return fields(v, ['outcome', 'messageId']) && ['completed', 'partial'].includes(v.outcome) && safeId(v.messageId) ||
       fields(v, ['outcome']) && ['failed', 'cancelled'].includes(v.outcome);
     case 'result': {
-    if (!fields(v, ['message', 'coverage', 'issues', 'sources', 'evidenceCheck'], ['memory']) ||
+      if (!fields(v, ['message', 'coverage', 'issues', 'sources', 'evidenceCheck'], ['memory', 'generation']) ||
           !fields(v.message, ['id', 'role', 'content', 'timestamp']) || !safeId(v.message.id) || v.message.role !== 'assistant' ||
           !textValue(v.message.content, 16000) || !v.message.content.trim() || !isoDate(v.message.timestamp, false, true) ||
           !['complete', 'partial'].includes(v.coverage) || v.evidenceCheck !== 'citation_ids_only' ||
@@ -553,6 +553,8 @@ export function validChatEvent(event, v) {
       if ('memory' in v && (!fields(v.memory, ['earlierConversations', 'fallback']) ||
           !Number.isInteger(v.memory.earlierConversations) || v.memory.earlierConversations < 0 ||
           v.memory.earlierConversations > 1000 || typeof v.memory.fallback !== 'boolean')) return false;
+      if ('generation' in v && (!fields(v.generation, ['origin']) ||
+          !['model', 'recovered'].includes(v.generation.origin))) return false;
       const ids = new Set();
       for (const s of v.sources) {
         if (!fields(s, ['id', 'query', 'title', 'url', 'retrieved_at'], ['published_at', 'effective_at']) ||
@@ -590,7 +592,10 @@ export async function readChatStream(response, options = {}) {
       if (value.phase === 'accepted') { if (accepted) invalid(); accepted = true; }
       else {
         if (!accepted) invalid();
-        if (value.phase === 'model_started') { if (value.call !== ++modelCalls) invalid(); }
+        if (value.phase === 'model_started') {
+          if (value.call !== ++modelCalls) invalid();
+          if (modelCalls > 1) options.onDraftReset?.();
+        }
         else { if (value.phase === 'search_started' && !modelCalls || value.attempt !== ++searchAttempts) invalid(); }
       }
       options.onProgress?.(value);

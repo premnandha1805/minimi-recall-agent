@@ -61,7 +61,7 @@ describe('Azure OpenAI v1 adapter (mock HTTP only)', () => {
       { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'web_search', arguments: '{"queries":["x"]}' } }] },
       { role: 'tool', tool_call_id: 'c1', content: '{"status":"unavailable"}' },
     ]);
-    expect(sent.tool_choice).toBe('none'); expect(sent.tools).toBeUndefined();
+    expect(sent.tool_choice).toBeUndefined(); expect(sent.tools).toBeUndefined();
   });
 
   it.each([401, 429, 500])('rejects HTTP %i without exposing provider bodies or retrying', async (status) => {

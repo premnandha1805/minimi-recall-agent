@@ -20,28 +20,29 @@ it('keeps streaming after the first-token deadline while bounding the overall ca
   } finally { scope.dispose(); vi.useRealTimers(); }
 });
 
-it('runs fresh web research and archive retrieval concurrently, sharing source IDs and the search budget', async () => {
+it('retrieves archive before model-driven web research, sharing source IDs and the search budget', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'recall-parallel-'));
-  let entered!: () => void; const searching = new Promise<void>((r) => { entered = r; });
-  let release!: () => void; const hold = new Promise<void>((r) => { release = r; });
   const snapshot = vi.spyOn(ConversationStore.prototype, 'snapshot');
-  const search = vi.fn(async () => { entered(); await hold; return [{ title: 'Current official fixture', url: 'https://example.com/current',
-    text: 'Current external evidence.', retrieved_at: new Date().toISOString() }]; });
+  const search = vi.fn(async () => [{ title: 'Current official fixture', url: 'https://example.com/current',
+    text: 'Current external evidence.', retrieved_at: new Date().toISOString() }]);
+  let calls = 0;
   const complete = vi.fn<ModelProvider['complete']>(async (request) => {
-    expect(JSON.stringify(request.messages)).toContain('untrustedWebSearchData');
+    if (++calls === 1) {
+      expect(search).not.toHaveBeenCalled();
+      expect(request.tools.map((t) => t.name)).toEqual(['web_search']);
+      return { text: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'web_search', arguments: '{"queries":["current external evidence"]}' }] };
+    }
     await request.onText?.('Current evidence [S1].');
     return { text: 'Current evidence [S1].', finishReason: 'stop', toolCalls: [] };
   });
   const app = buildServer({ memoryDirectory: directory, logger: false, config: loadConfig(azureEnv),
     provider: { contextWindowTokens: 65536, complete }, search });
   try {
-    const pending = app.inject({ method: 'POST', url: '/api/chat', payload: { message: 'Search the web for current external evidence.' } }).then((r) => r);
-    await searching;
-    await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2)); // persisted-stage summary + actual retrieval, while search is blocked
-    expect(complete).not.toHaveBeenCalled(); release();
-    const response = await pending; const deltas: string[] = [];
+    const response = await app.inject({ method: 'POST', url: '/api/chat', payload: { message: 'Search the web for current external evidence.' } });
+    expect(snapshot).toHaveBeenCalledTimes(2); // persisted-stage summary + actual retrieval
+    const deltas: string[] = [];
     const result = await readChatStream(new Response(response.body), { onDelta: (s) => { deltas.push(s); } });
     expect(result.result?.sources).toMatchObject([{ id: 'S1', url: 'https://example.com/current' }]);
-    expect(deltas.join('')).toBe('Current evidence [S1].'); expect(search).toHaveBeenCalledTimes(1); expect(complete).toHaveBeenCalledTimes(1);
-  } finally { release(); await app.close(); snapshot.mockRestore(); await rm(directory, { recursive: true, force: true }); }
+    expect(deltas.join('')).toBe('Current evidence [S1].'); expect(search).toHaveBeenCalledTimes(1); expect(complete).toHaveBeenCalledTimes(2);
+  } finally { await app.close(); snapshot.mockRestore(); await rm(directory, { recursive: true, force: true }); }
 });

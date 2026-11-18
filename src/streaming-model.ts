@@ -36,7 +36,7 @@ export function createStreamingModelProvider(config: AppConfig, fetchImpl: typeo
         const result = streamText({ model: azure.chat(config.AZURE_OPENAI_DEPLOYMENT!), messages, instructions,
           maxOutputTokens: request.maxOutputTokens, maxRetries: 0, stopWhen: isStepCount(1),
           abortSignal: request.signal, timeout: { firstChunkMs: 15_000 },
-          ...(request.tools.length ? { tools: Object.fromEntries(request.tools.map((t) => [t.name,
+          ...(request.tools.length ? { toolChoice: 'auto' as const, tools: Object.fromEntries(request.tools.map((t) => [t.name,
             tool({ description: t.description, inputSchema: jsonSchema(t.parameters) })])) } : {}),
           onError: () => { /* The fullStream error below owns failure reporting; no upstream text in logs. */ },
         });

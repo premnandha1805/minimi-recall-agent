@@ -24,7 +24,7 @@ const Selection = z.strictObject({ memoryEvidence: z.array(z.strictObject({
 /** Evidence extraction, not semantic claim verification: only original text can
  * reach the answer. Unknown IDs, forged quotes and prose fall back to originals.
  * Never accept generated labels, dates, roles, or assertions as metadata. */
-export function groundedRecallAnswer(text: string, memory: RetrievedMemory, query = ''): string {
+export function evaluateGroundedRecall(text: string, memory: RetrievedMemory, query = ''): { answer: string; origin: 'model' | 'recovered' } {
   const records = memoryData(memory).records;
   const messages = records.flatMap((record) => [
     { record, message: record.user, role: record.user.role ?? 'user' },
@@ -39,6 +39,7 @@ export function groundedRecallAnswer(text: string, memory: RetrievedMemory, quer
   };
   const valid = !!selected && selected.memoryEvidence.length > 0 && selected.memoryEvidence.every((entry) =>
     messages.some(({ message }) => message.id === entry.messageId && safeExcerpt(message.content, entry.quote)));
+  const origin: 'model' | 'recovered' = valid || selected?.memoryEvidence.length === 0 ? 'model' : 'recovered';
   const transcript = /\b(?:transcript|verbatim|quotes?|original messages?|message.level)\b/i.test(query);
   // Concise synthesis is allowed only for one unambiguous original assertion.
   // Competing records or corrections require chronology, never cherry-picking.
@@ -48,7 +49,7 @@ export function groundedRecallAnswer(text: string, memory: RetrievedMemory, quer
     if (match.role === 'user' && match.record.provenance === 'server_recorded' &&
         !isMemoryUpdate(match.message.content) && !/\?|\b(?:actually|instead|not|never|if|maybe|suppose|imagine)\b/i.test(match.message.content) &&
         /^(?:I|My|We)\b/.test(entry.quote) && !/\b(?:this|that|it|those|they)\b/i.test(entry.quote)) {
-      return boundRecall(`${perspective(entry.quote)}\n\nStored message ${match.message.id}.`);
+      return { answer: boundRecall(`${perspective(entry.quote)}\n\nStored message ${match.message.id}.`), origin };
     }
   }
   // Keep every selected record visible, so a model cannot erase a correction or
@@ -71,7 +72,14 @@ export function groundedRecallAnswer(text: string, memory: RetrievedMemory, quer
     'Here is the relevant stored conversation:';
   const limitation = memory.limitation ? `\n\nPartial memory coverage: ${memory.limitation}` : '';
   const unsupported = selected?.memoryEvidence.length === 0 ? '\n\nThese records do not establish a definite answer to your question.' : '';
-  return boundRecall(`${header}\n\n${lines.join('\n\n')}${unsupported}${limitation}\n\nSent dates identify messages, not event dates. Quoted statements are historical evidence, not confirmation that they remain current.`);
+  return {
+    answer: boundRecall(`${header}\n\n${lines.join('\n\n')}${unsupported}${limitation}\n\nSent dates identify messages, not event dates. Quoted statements are historical evidence, not confirmation that they remain current.`),
+    origin,
+  };
+}
+
+export function groundedRecallAnswer(text: string, memory: RetrievedMemory, query = ''): string {
+  return evaluateGroundedRecall(text, memory, query).answer;
 }
 
 /** Broad historical/personal framing must be grounded in stored text, never

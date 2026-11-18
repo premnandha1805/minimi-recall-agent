@@ -6,7 +6,7 @@ import { ChatHistoryMessageSchema, ChatResultSchema, SourceMetadataSchema, isVal
 
 export const MEMORY_LIMITS = Object.freeze({ conversations: 100, fileBytes: 4 * 1024 * 1024,
   totalBytes: 64 * 1024 * 1024, directoryEntries: 256, turns: 500, attempts: 8,
-  seededMessages: 1000, seedBatch: 100, pageSize: 50 });
+  seededMessages: 1000, seedBatch: 100, pageSize: 50, quarantineFiles: 16 });
 const Id = z.uuid();
 const Key = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 const Utc = z.iso.datetime();
@@ -141,18 +141,40 @@ export class ConversationStore {
     this.commitQueue = next;
     return next;
   }
+  private async checkBackups(additionalCorrupt = 0): Promise<void> {
+    const backups = join(this.directory, '.backups');
+    let stat;
+    try { stat = await fs.lstat(backups); } catch (e) { if (missing(e)) return; throw e; }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new MemoryError('CORRUPT');
+    let corruptCount = 0;
+    let totalBytes = 0;
+    const dir = await fs.opendir(backups);
+    for await (const entry of dir) {
+      const entryStat = await fs.lstat(join(backups, entry.name));
+      if (!entryStat.isFile() || entryStat.isSymbolicLink() ||
+          !/^[a-f0-9]{64}\.json(?:\.[a-f0-9-]+\.(?:tmp|corrupt))?$/.test(entry.name)) throw new MemoryError('CORRUPT');
+      if (entryStat.size > MEMORY_LIMITS.fileBytes) throw new MemoryError('LIMIT');
+      totalBytes += entryStat.size;
+      if (entry.name.endsWith('.corrupt')) corruptCount++;
+      if (corruptCount + additionalCorrupt > MEMORY_LIMITS.quarantineFiles || totalBytes > MEMORY_LIMITS.totalBytes) {
+        throw new MemoryError('LIMIT');
+      }
+    }
+  }
   private async inventory() {
     const files: Array<{ name: string; size: number }> = [];
     let total = 0;
+    let hasBackups = false;
     const dir = await fs.opendir(this.directory);
     for await (const entry of dir) {
-      if (entry.name === '.backups' && entry.isDirectory() && !entry.isSymbolicLink()) continue;
+      if (entry.name === '.backups' && entry.isDirectory() && !entry.isSymbolicLink()) { hasBackups = true; continue; }
       if (files.length >= Math.max(MEMORY_LIMITS.directoryEntries, this.maxConversations * 2 + 16)) throw new MemoryError('LIMIT');
       const stat = await fs.lstat(join(this.directory, entry.name));
       if (!stat.isFile() || stat.isSymbolicLink() || !/^[a-f0-9]{64}\.json(?:\.[a-f0-9-]+\.tmp)?$/.test(entry.name)) throw new MemoryError('CORRUPT');
       if (stat.size > MEMORY_LIMITS.fileBytes) throw new MemoryError('LIMIT');
       total += stat.size; files.push({ name: entry.name, size: stat.size });
     }
+    if (hasBackups) await this.checkBackups();
     if (total > MEMORY_LIMITS.totalBytes || files.filter((f) => f.name.endsWith('.json')).length > this.maxConversations) throw new MemoryError('LIMIT');
     return { files, total };
   }
@@ -255,7 +277,9 @@ export class ConversationStore {
    * writes already queued at entry; later commits cannot interleave the scan. */
   async snapshot(signal?: AbortSignal): Promise<Conversation[]> {
     if (this.closed) throw new MemoryError('CLOSED');
-    await Promise.all([...this.queues.values()]);
+    // Wait for settlement, not success: a failed write has no committed state.
+    // Its caller receives the error; unrelated conversations remain readable.
+    await Promise.allSettled([...this.queues.values()]);
     return this.serial('$snapshot', () => this.commit(async () => {
       signal?.throwIfAborted();
       if (this.cachedSnapshots) return structuredClone([...this.snapshotCache.values()]);
@@ -423,7 +447,7 @@ export class ConversationStore {
       conversationCount: conversations.length, messageCount: conversations.reduce((n, c) => n + c.messageCount, 0), conversations };
   }
   /** Explicit flush for callers admitting a turn before network work. */
-  async flush(): Promise<void> { await Promise.all([...this.queues.values()]); await this.commitQueue; }
+  async flush(): Promise<void> { await Promise.allSettled([...this.queues.values()]); await this.commitQueue.catch(() => {}); }
   /** Startup recovery never discards the damaged original. Unsupported schemas and
    * identity mismatches still fail closed; only malformed/empty JSON is recovered. */
   private async restoreBackups() {
@@ -435,6 +459,7 @@ export class ConversationStore {
       try { JSON.parse(bytes); continue; } catch { /* preserve original below */ }
       const backups = join(this.directory, '.backups'); await fs.mkdir(backups, { recursive: true, mode: 0o700 });
       if ((await fs.lstat(backups)).isSymbolicLink()) throw new MemoryError('CORRUPT');
+      await this.checkBackups(1);
       let backup: string | undefined;
       try {
         const candidate = await fs.readFile(join(backups, name), 'utf8');
