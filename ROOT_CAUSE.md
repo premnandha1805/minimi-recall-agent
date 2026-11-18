@@ -33,4 +33,148 @@ error mentioned tools; omitting it → HTTP 200 in 1,932 ms with a completion.
 
 ## Fixes and final verification
 
-Pending implementation and measured results.
+### What changed
+
+- **H1/H8 safeguards:** `addTurn` is awaited and the queue explicitly flushed
+  before provider/search work. Assistant failures now have their own ISO-stamped
+  message with `status: error`, separate from accepted answers. Retry identity is
+  unchanged. A retry race was also fixed: the conversation execution lock is
+  released before ending SSE, after the durable terminal write.
+- **H2 safeguards:** the default is now `<project>/.data/conversations`, independent
+  of the launching working directory. `MEMORY_DIRECTORY` is the single configured
+  source; relative values resolve against the project root. The previous archive
+  is copied once when the new default does not exist; originals remain intact.
+  `tsx watch` explicitly ignores both data directories. Startup logs the absolute
+  path. A read-only Windows check found exactly one listener on `127.0.0.1:3000`.
+- **H3/H4:** every HTTP request scans a validated committed archive snapshot.
+  Intent controls answering and evidence volume, never archive access. Runtime
+  normalization includes stemming, punctuation/case normalization, aliases,
+  dated/named-record boosts, identifier constraints and recency. Generic personal
+  questions return recent user statements. Ordinary continuity keeps the active
+  conversation alongside bounded archive snippets.
+- **H5:** context includes actual scan counts and explicit empty/found modes.
+  An empty search is never proof that something was never said. At zero earlier
+  conversations, the response says there is no saved history yet. Relevant history
+  includes dates, titles and neighboring messages; the recall block is capped near
+  10,000 bytes (roughly 2,500 estimated tokens), with omissions disclosed.
+- **H6 and the confirmed HTTP 400:** production now uses pinned `ai@7.0.176` and
+  `@ai-sdk/openai@4.0.121` through the existing model interface. Disabled tools omit
+  `tool_choice`; trusted system text uses SDK 7's `instructions` option. Source and
+  SDK docs were inspected locally. `streamText` uses `isStepCount(1)` and disables
+  SDK retries; the application owns search limits and a single transient retry.
+  Normal recall makes one answer call, without any LLM classifier/validator.
+  Timeouts/5xx allow one shorter-context retry inside the unchanged 25 s overall
+  budget. A 15 s first-token timer ends when meaningful output arrives; streaming
+  can continue within the overall deadline. Time is reserved for grounded output
+  and atomic persistence. SSE drafts are plain text, then replaced by the validated
+  final answer. Raw provider errors never become fallback prose.
+- **H7 safeguard:** yearless event mentions receive an explicitly inferred nearest
+  occurrence relative to the original ISO timestamp and timezone. Original wording
+  remains authoritative; this never proves an event is upcoming. Conversation-date
+  lookups retain their most-recent-past rule and strict weekday behavior.
+- **Storage:** the production snapshot updates only after successful atomic rename;
+  reads await pending writes. Startup validates files once. Small files allocate
+  their admitted size rather than 4 MiB per read. Malformed/empty files are retained
+  as private `.corrupt` backups and recovered from a validated previous revision
+  when available. Unsupported schemas/identity mismatches still fail closed.
+- **UI:** New chat preserves the archive, memory use is disclosed, drafts arrive
+  during generation, and failed requests retain a clear retry action. Error messages
+  remain excluded from factual assistant history.
+
+The original JSON adapter remains available for callers using its injectable
+completion transport. Existing frozen HTTP fixtures continue to exercise that
+boundary; new SDK-stream tests validate the production wire format, and new
+Fastify tests inject normal, stuck and throwing model implementations. No existing
+test was changed, removed or weakened.
+
+### Further issues caught during repair
+
+An early streaming pilot exposed two adapter mistakes introduced during this
+repair: an incorrect base URL suffix, then SDK 7 rejecting system-role messages
+inside `messages`. The SDK regression now includes trusted system instructions and
+asserts the exact configured endpoint, streaming chunks and absent tool fields.
+The initial pilot also showed `Who did I ask…` being missed and `I asked Priya…`
+being mistaken for a recall question; runtime routing now distinguishes both.
+These are repair findings, not claims about the original merged implementation.
+
+### Measured verification
+
+```text
+npm.cmd test
+  Test Files 29 passed (29)
+  Tests      892 passed | 1 skipped (893)
+  Duration   35.31s
+npm.cmd run typecheck
+  server passed; browser passed
+npm.cmd run lint
+  0 errors (dependency-free conflict-marker/NUL hygiene check)
+```
+
+The original 852 tests are retained; the initial working tree already contained
+15 additional provider diagnostic tests. This repair adds 25 tests. The single
+skip is the existing Windows symlink-permission test. Lint is intentionally a
+small hygiene check; semantic checking is the strict TypeScript compiler.
+
+The 500-conversation on-disk fixture uses the production committed snapshot.
+After startup/JIT warmup, five complete retrieval calls measured **24.49, 16.56,
+19.03, 14.58, 15.17 ms**; all stayed below the 50 ms assertion. Startup I/O is not
+included in those lookup timings. This is a synthetic local measurement, not a
+guarantee for arbitrary disk sizes, hardware or concurrent workloads.
+
+`node --import tsx scripts/live-e2e.ts --runs=3` was run against the actual dev
+server, configured Azure deployment and real `.data/conversations` archive.
+**12/12 fact pairs passed across three consecutive runs.** All 12 recall responses
+received provider tokens and used no deterministic model-failure fallback. The
+machine-readable report includes per-request IDs and first-token timings:
+[live-e2e-results.json](docs/live-e2e-results.json). Each pair creates two new
+conversations, waits for complete SSE, and checks the requested names/date/facts.
+Project/task identifiers vary per run to prevent old fixtures from satisfying a
+new query accidentally. No billing or account settings were changed.
+
+Final real output (total latency includes both chats and conversation creation):
+
+| Fact pair | Run 1 | Run 2 | Run 3 |
+| --- | --- | --- | --- |
+| Infosys / 23 August | PASS 2,878 ms | PASS 3,062 ms | PASS 2,875 ms |
+| Project / PostgreSQL | PASS 2,491 ms | PASS 2,365 ms | PASS 3,801 ms |
+| Notebook / Dell | PASS 3,186 ms | PASS 3,327 ms | PASS 2,499 ms |
+| Priya / deployment checklist | PASS 3,341 ms | PASS 3,287 ms | PASS 3,244 ms |
+
+```text
+12/12 pairs passed; 3 consecutive runs PASS.
+```
+
+Recall first-token times were 734–1,456 ms. All recall calls used one model call
+and zero searches. One initial fact-statement request had a provider failure
+without a usable status and returned saved evidence instead; its response was
+grounded, not an error. The live report's null initial first-token field makes
+that limitation visible; it is not counted as successful provider generation.
+
+A clean `git archive` checkout of runtime commit `4117618` also passed:
+
+```text
+npm.cmd ci --no-audit --no-fund
+  added 109 packages in 30s
+npm.cmd install --no-audit --no-fund
+  up to date in 3s
+npm.cmd run dev
+  tsx watch --ignore ./.data/** --ignore ./.recall-data/** src/index.ts
+  Server listening at http://127.0.0.1:3011
+GET /health
+  {"status":"ok","service":"minimi-recall-agent","version":"1.0.0",...}
+```
+
+That clean startup used an isolated archive and startup-only default provider
+configuration; live chat/provider verification above used the original configured
+server. The clean smoke server was stopped afterward. No credentials were copied
+into the clean checkout.
+
+Raw logs remain local in ignored `live-memory.log` / `live-memory-debug.log`.
+`DEBUG_MEMORY=1` enables requested 80-character excerpts; by default operational
+logs retain counts, scores and canonical conversation IDs without raw history.
+The debug endpoint remains loopback/same-origin protected and is disabled in
+production unless `DEBUG_MEMORY=1`.
+
+Browser automation could not determine Chrome's URL and stopped for policy
+enforcement. Real HTTP/SSE verification and the existing browser DOM tests passed;
+manual visual verification in Chrome is not claimed.

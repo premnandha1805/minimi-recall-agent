@@ -91,13 +91,13 @@ flowchart LR
   Agent -->|Only external tool: web_search| Search[Tavily Search Coordinator]
   Search -->|Max 2 rounds / 8 queries| Agent
   Agent -->|Quotation check + 4 verdicts| Verification[Deterministic Verification]
-  Verification -->|Atomic JSON write| Storage[(".recall-data/ Store")]
+  Verification -->|Atomic JSON write| Storage[(".data/conversations Store")]
   Verification -->|Validated SSE stream| UI
 ```
 
 - **One Tool Loop:** The model's only external tool is `web_search`. Memory retrieval and temporal date calculations run deterministically before the model is called.
-- **Strict Budgeting:** Overall request deadline of 25 seconds; search admission cutoff at 15 seconds; model call timeout of 10 seconds; search query timeout of 4 seconds. Capped at 2 search rounds (up to 5 queries in round 1, up to 3 additional in round 2; 8 total).
-- **Streaming & SSE:** Delivers factual progress indicators followed by a validated final answer via Server-Sent Events (`recall.chat.v1`). Client socket disconnects immediately abort pending provider requests.
+- **Strict Budgeting:** Overall request deadline of 25 seconds; search admission cutoff at 15 seconds; first model token deadline of 15 seconds, with one shorter-context retry on timeout/5xx inside the same overall budget. Capped at 2 search rounds (up to 5 queries in round 1, up to 3 additional in round 2; 8 total).
+- **Streaming & SSE:** The pinned Vercel AI SDK streams provisional text over `recall.chat.v1`; final deterministic evidence checks replace the draft. Client disconnects abort pending work. Recall failures fall back to stored quotations when evidence exists.
 
 ---
 
@@ -106,6 +106,29 @@ server data directory. It returns verified historical excerpts or original messa
 with roles and sent dates; it does not freely invent a paraphrased memory. Calendar
 month/year queries and linked follow-ups are supported within bounded lexical
 retrieval. See [the audit, changes and limitations](docs/memory-reliability.md).
+
+Every chat searches memory, including natural questions such as "Do I have anything
+planned?" The original user message is on disk before model/search work begins.
+New chat changes the conversation ID and preserves saved conversations. Memory use
+appears below the answer; failures retain a Retry action.
+
+`MEMORY_DIRECTORY` selects the archive (default `<project>/.data/conversations`).
+Relative paths resolve against the project root. On first use, an existing
+`.recall-data` archive is copied to the new default and retained as an untouched
+legacy copy. Both directories are explicitly ignored by the development watcher.
+One process owns an archive; do not run two servers against the same directory.
+Malformed/empty files are recovered on restart from private validated backups;
+damaged originals remain under `.backups`. Other schema/identity errors fail closed.
+
+`GET /api/debug/memory` reports the resolved directory, JSON paths/sizes, titles,
+message counts and update times. It is loopback/same-origin only, enabled outside
+production or with `DEBUG_MEMORY=1`. That flag also enables bounded retrieved-text
+previews in local logs. Keep diagnostic logs private.
+
+The real SDK transport is in `src/streaming-model.ts`; `src/model.ts` retains the
+bounded JSON completion adapter for existing injected transports. Fake-provider
+Fastify tests and separate SDK SSE fixtures cover both boundaries. Neither adapter
+adds model tools besides `web_search`.
 
 ## 4. Verification and Automated Evaluations
 
@@ -118,12 +141,28 @@ npm.cmd run typecheck
 # 2. Run automated test suite
 npm.cmd test
 
+# Hygiene lint (strict TypeScript above performs semantic checks)
+npm.cmd run lint
+
 # 3. Run the frozen 31-case offline evaluation suite
 npm.cmd run eval:offline
 
 # 4. Run the 10 adversarial capability scenarios
 npx vitest run tests/adversarial-eval.test.ts
 ```
+
+To repeat the real cross-chat verification, keep `npm.cmd run dev` running in one
+PowerShell window and run this in another:
+
+```powershell
+npm.cmd run test:live -- --runs=3
+```
+
+This uses your configured real provider and saved archive, creates 24 synthetic
+conversations, and writes `docs/live-e2e-results.json`. It makes model API requests;
+check your existing quota before running. It does not change billing or account
+settings. The latest run passed 12/12 pairs across three consecutive runs. See
+[ROOT_CAUSE.md](ROOT_CAUSE.md) for the reproduced failure, fixes and actual outputs.
 
 Run the dedicated, provider-free memory checks and write their actual measurements:
 

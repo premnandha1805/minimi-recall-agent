@@ -1,0 +1,141 @@
+{
+  "timestamp": "2026-11-18T16:19:10.706Z",
+  "provider": "real configured provider",
+  "runs": 3,
+  "passed": 12,
+  "total": 12,
+  "rows": [
+    {
+      "run": 1,
+      "pair": "meeting",
+      "status": "PASS",
+      "totalMs": 2878,
+      "firstTokenA": null,
+      "firstTokenB": 1456,
+      "requestA": "57e095b3-5247-4d0f-9198-555dee93ea65",
+      "requestB": "fb69f3dd-460e-4cbb-ad61-f3df97d982e3",
+      "fallback": false
+    },
+    {
+      "run": 1,
+      "pair": "project database",
+      "status": "PASS",
+      "totalMs": 2491,
+      "firstTokenA": 947,
+      "firstTokenB": 734,
+      "requestA": "283685cc-fdb5-44dd-ae74-4d16d9d8431c",
+      "requestB": "407bcc49-8a4d-404a-a699-a58cf38a598f",
+      "fallback": false
+    },
+    {
+      "run": 1,
+      "pair": "laptop purchase",
+      "status": "PASS",
+      "totalMs": 3186,
+      "firstTokenA": 1318,
+      "firstTokenB": 1281,
+      "requestA": "269071f1-9f74-466f-a0bd-f8ce7eee4078",
+      "requestB": "2da48f40-4ff9-4c7a-b771-e3702244458a",
+      "fallback": false
+    },
+    {
+      "run": 1,
+      "pair": "person and task",
+      "status": "PASS",
+      "totalMs": 3341,
+      "firstTokenA": 1414,
+      "firstTokenB": 799,
+      "requestA": "3485f349-2e2b-40d6-ab1b-10ebf4de126f",
+      "requestB": "71896bab-08b0-49a0-a902-9e92fa85ba53",
+      "fallback": false
+    },
+    {
+      "run": 2,
+      "pair": "meeting",
+      "status": "PASS",
+      "totalMs": 3062,
+      "firstTokenA": 1121,
+      "firstTokenB": 935,
+      "requestA": "7c58a2a6-5484-4095-8616-0c00a5361289",
+      "requestB": "07ac698b-72d6-4ec2-a430-4654ffc0dc69",
+      "fallback": false
+    },
+    {
+      "run": 2,
+      "pair": "project database",
+      "status": "PASS",
+      "totalMs": 2365,
+      "firstTokenA": 872,
+      "firstTokenB": 850,
+      "requestA": "cc074b12-a9b0-4493-84bb-decdc43552cb",
+      "requestB": "6a423600-4738-4650-808f-df3d89165a35",
+      "fallback": false
+    },
+    {
+      "run": 2,
+      "pair": "laptop purchase",
+      "status": "PASS",
+      "totalMs": 3327,
+      "firstTokenA": 1730,
+      "firstTokenB": 925,
+      "requestA": "52809db8-0ed8-459e-a165-865f0a798ac5",
+      "requestB": "29920147-478f-4fcf-bab7-4a6f5923f2c8",
+      "fallback": false
+    },
+    {
+      "run": 2,
+      "pair": "person and task",
+      "status": "PASS",
+      "totalMs": 3287,
+      "firstTokenA": 1400,
+      "firstTokenB": 826,
+      "requestA": "114cd1da-ee24-464f-8e0c-59e19d9a57ac",
+      "requestB": "f0adeac0-306e-4574-82af-a74008adcf79",
+      "fallback": false
+    },
+    {
+      "run": 3,
+      "pair": "meeting",
+      "status": "PASS",
+      "totalMs": 2875,
+      "firstTokenA": 1009,
+      "firstTokenB": 1101,
+      "requestA": "37db64e4-1aa7-434e-a052-646cbb2561de",
+      "requestB": "7e9ef7d8-d84c-40a1-a3f4-74aea7826edb",
+      "fallback": false
+    },
+    {
+      "run": 3,
+      "pair": "project database",
+      "status": "PASS",
+      "totalMs": 3801,
+      "firstTokenA": 1177,
+      "firstTokenB": 1277,
+      "requestA": "0eb5d79a-f991-4279-b3a0-a55ff6e2e161",
+      "requestB": "138ebf5d-f538-4285-b51e-859579ee89c2",
+      "fallback": false
+    },
+    {
+      "run": 3,
+      "pair": "laptop purchase",
+      "status": "PASS",
+      "totalMs": 2499,
+      "firstTokenA": 1141,
+      "firstTokenB": 796,
+      "requestA": "491a141d-c43e-4a31-824b-a8932f4494fc",
+      "requestB": "8268ea6a-1180-44f2-aa1d-3bd8a2608849",
+      "fallback": false
+    },
+    {
+      "run": 3,
+      "pair": "person and task",
+      "status": "PASS",
+      "totalMs": 3244,
+      "firstTokenA": 801,
+      "firstTokenB": 1443,
+      "requestA": "68774ae8-7ee1-4138-9e34-4707dbdf61a3",
+      "requestB": "2d8bd4f9-6573-4702-b889-f2eab39f2156",
+      "fallback": false
+    }
+  ]
+}
