@@ -26,6 +26,7 @@ export { MAX_MESSAGE_CHARS };
  * @property {'loading'} kind
  * @property {string} messageText
  * @property {string} [progress]
+ * @property {string} [draft]
  */
 
 /**
@@ -726,6 +727,7 @@ export function createChatApp(options = {}) {
     top.appendChild(cancelBtn);
 
     card.appendChild(top);
+    if (entry.draft) card.appendChild(el(doc, 'p', 'streaming-draft', entry.draft));
     card.appendChild(
       el(
         doc,
@@ -1015,6 +1017,8 @@ export function createChatApp(options = {}) {
         answerCard.appendChild(recover);
       }
     }
+    if (entry.result?.memory?.earlierConversations) answerCard.appendChild(el(doc, 'p', 'research-limitation',
+      `Used memory from ${entry.result.memory.earlierConversations} earlier conversations`));
     if (entry.result?.coverage === 'partial') {
       const labels = {
         search_budget_exhausted: 'Search budget reached', search_cutoff: 'Search time window ended',
@@ -1233,6 +1237,21 @@ export function createChatApp(options = {}) {
         fetchImpl,
         maxHistoryItems,
         maxBodyBytes,
+        onDelta: (text) => {
+          if (requestState.controller.signal.aborted || activeRequest?.requestToken !== requestToken) return;
+          const entry = targetSession.entries.find((item) => item.id === loadingEntryId);
+          if (entry?.kind !== 'loading') return;
+          entry.draft = ((entry.draft ?? '') + text).slice(-16000);
+          if (activeSession.id === targetSession.id) {
+            const card = messageListEl?.querySelector(`[data-entry-id="${loadingEntryId}"] .loading-card`);
+            if (card) {
+              let draft = card.querySelector('.streaming-draft');
+              if (!draft) { draft = el(doc, 'p', 'streaming-draft'); card.appendChild(draft); }
+              draft.textContent = entry.draft;
+              const label = card.querySelector('.loading-label'); if (label) label.textContent = 'Draft response · checking evidence…';
+            }
+          }
+        },
         onProgress: (progress) => {
           if (requestState.controller.signal.aborted || activeRequest?.requestToken !== requestToken) return;
           const entry = targetSession.entries.find((item) => item.id === loadingEntryId);

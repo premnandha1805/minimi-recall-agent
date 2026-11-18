@@ -23,6 +23,20 @@ export function createDeadlineScope(parent: AbortSignal, timeoutMs: number): {
   };
 }
 
+/** First meaningful output has its own deadline. Once it arrives, streaming may
+ * continue within the remaining overall budget instead of being cut off at 15 s. */
+export function createFirstTokenScope(parent: AbortSignal, totalMs: number, firstTokenMs: number) {
+  const total = createDeadlineScope(parent, totalMs);
+  const controller = new AbortController();
+  const forward = () => controller.abort(total.signal.reason);
+  total.signal.addEventListener('abort', forward, { once: true });
+  if (total.signal.aborted) forward();
+  const timer = setTimeout(() => controller.abort(new ExecutionTimeoutError('First token deadline exceeded')), firstTokenMs);
+  return { signal: controller.signal, markFirstToken: () => clearTimeout(timer), dispose: () => {
+    clearTimeout(timer); total.signal.removeEventListener('abort', forward); total.dispose();
+  } };
+}
+
 /** Starts at request arrival and ends when the response finishes or the client leaves. */
 export function createExecution(
   request: IncomingMessage,

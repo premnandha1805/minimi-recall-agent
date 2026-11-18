@@ -462,7 +462,8 @@ async function sendChatRequestInner(payload, options = {}) {
 
 /** @typedef {import('../src/contracts.js').ChatEventPayloads} ChatEvents */
 /** @typedef {{signal?: AbortSignal, fetchImpl?: typeof fetch, maxHistoryItems?: number,
- * maxBodyBytes?: number, onProgress?: (progress: ChatEvents['progress']) => void}} ChatOptions */
+ * maxBodyBytes?: number, onProgress?: (progress: ChatEvents['progress']) => void,
+ * onDelta?: (text: string) => void}} ChatOptions */
 
 /** A transport watchdog includes fetch and body reading, without extending the server deadline.
  * @param {ChatRequestPayload} payload @param {ChatOptions} [options]
@@ -536,18 +537,22 @@ export function validChatEvent(event, v) {
       typeof v.requestId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v.requestId);
     case 'progress': return fields(v, ['phase']) && v.phase === 'accepted' ||
       fields(v, ['phase', 'call']) && v.phase === 'model_started' && Number.isInteger(v.call) && v.call >= 1 && v.call <= 3 ||
-      fields(v, ['phase', 'attempt']) && v.phase === 'search_started' && Number.isInteger(v.attempt) && v.attempt >= 1 && v.attempt <= 8;
+      fields(v, ['phase', 'attempt']) && ['search_started', 'research_started'].includes(v.phase) && Number.isInteger(v.attempt) && v.attempt >= 1 && v.attempt <= 8;
     case 'error': return fields(v, ['code', 'message']) && errorCodes.includes(v.code) && textValue(v.message, 256);
+    case 'delta': return fields(v, ['text']) && textValue(v.text, 16000);
     case 'done': return fields(v, ['outcome', 'messageId']) && ['completed', 'partial'].includes(v.outcome) && safeId(v.messageId) ||
       fields(v, ['outcome']) && ['failed', 'cancelled'].includes(v.outcome);
     case 'result': {
-      if (!fields(v, ['message', 'coverage', 'issues', 'sources', 'evidenceCheck']) ||
+    if (!fields(v, ['message', 'coverage', 'issues', 'sources', 'evidenceCheck'], ['memory']) ||
           !fields(v.message, ['id', 'role', 'content', 'timestamp']) || !safeId(v.message.id) || v.message.role !== 'assistant' ||
           !textValue(v.message.content, 16000) || !v.message.content.trim() || !isoDate(v.message.timestamp, false, true) ||
           !['complete', 'partial'].includes(v.coverage) || v.evidenceCheck !== 'citation_ids_only' ||
           !Array.isArray(v.issues) || v.issues.length > 6 || !v.issues.every((/** @type {any} */ i) => issues.includes(i)) ||
           new Set(v.issues).size !== v.issues.length || (v.coverage === 'complete') !== (v.issues.length === 0) ||
           !Array.isArray(v.sources) || v.sources.length > 24) return false;
+      if ('memory' in v && (!fields(v.memory, ['earlierConversations', 'fallback']) ||
+          !Number.isInteger(v.memory.earlierConversations) || v.memory.earlierConversations < 0 ||
+          v.memory.earlierConversations > 1000 || typeof v.memory.fallback !== 'boolean')) return false;
       const ids = new Set();
       for (const s of v.sources) {
         if (!fields(s, ['id', 'query', 'title', 'url', 'retrieved_at'], ['published_at', 'effective_at']) ||
@@ -586,9 +591,11 @@ export async function readChatStream(response, options = {}) {
       else {
         if (!accepted) invalid();
         if (value.phase === 'model_started') { if (value.call !== ++modelCalls) invalid(); }
-        else { if (!modelCalls || value.attempt !== ++searchAttempts) invalid(); }
+        else { if (value.phase === 'search_started' && !modelCalls || value.attempt !== ++searchAttempts) invalid(); }
       }
       options.onProgress?.(value);
+    } else if (event === 'delta' && accepted && modelCalls > 0 && !result && !error) {
+      options.onDelta?.(value.text);
     } else if (event === 'result' && accepted && !result && !error) result = value;
     else if (event === 'error' && accepted && !result && !error) error = value;
     else if (event === 'done') {

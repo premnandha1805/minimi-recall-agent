@@ -130,6 +130,7 @@ export const ChatResultSchema = z.strictObject({
   issues: z.array(ResearchIssueSchema).max(6),
   sources: z.array(SourceMetadataSchema).max(24),
   evidenceCheck: z.literal('citation_ids_only'),
+  memory: z.strictObject({ earlierConversations: z.number().int().min(0).max(1000), fallback: z.boolean() }).optional(),
 }).superRefine((value, ctx) => {
   const ids = new Set(value.sources.map((s) => s.id));
   if (ids.size !== value.sources.length || new Set(value.issues).size !== value.issues.length ||
@@ -145,8 +146,10 @@ export const ChatEventSchemas = {
     z.strictObject({ phase: z.literal('accepted') }),
     z.strictObject({ phase: z.literal('model_started'), call: z.number().int().min(1).max(3) }),
     z.strictObject({ phase: z.literal('search_started'), attempt: z.number().int().min(1).max(8) }),
+    z.strictObject({ phase: z.literal('research_started'), attempt: z.number().int().min(1).max(8) }),
   ]),
   result: ChatResultSchema,
+  delta: z.strictObject({ text: z.string().min(1).max(16_000) }),
   error: z.strictObject({ code: StreamErrorCodeSchema, message: z.string().min(1).max(256) }),
   done: z.union([
     z.strictObject({ outcome: z.enum(['completed', 'partial']), messageId: SafeIdSchema }),

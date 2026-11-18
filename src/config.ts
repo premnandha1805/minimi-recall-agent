@@ -17,7 +17,8 @@ export const EnvSchema = z.object({
     .default('info'),
   MAX_BODY_BYTES: z.coerce.number().int().min(1024).max(5_242_880).default(262_144),
   REQUEST_DEADLINE_MS: z.coerce.number().int().min(1000).max(25_000).default(25_000),
-  MEMORY_DIRECTORY: z.string().trim().min(1).default(resolve(import.meta.dirname, '..', '.data', 'conversations')),
+  MEMORY_DIRECTORY: z.string().trim().min(1).default(resolve(import.meta.dirname, '..', '.data', 'conversations'))
+    .transform((path) => resolve(import.meta.dirname, '..', path)),
   DEBUG_MEMORY: z.enum(['0', '1']).default('0'),
   DEFAULT_TIMEZONE: z
     .string()

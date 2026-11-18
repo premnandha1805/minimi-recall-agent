@@ -8,11 +8,15 @@ import { type AppConfig, loadConfig } from './config.js';
 import { createExecution, runWithSignal, ExecutionTimeoutError } from './execution.js';
 import { authoritativeHistory, installMemoryHttp } from './memory-http.js';
 import { MemoryError } from './memory.js';
-import { retrieveMemory, recallIntent } from './context.js';
+import { retrieveMemory, requestRecallIntent, isExternalRequest, isNewPersonalFact } from './context.js';
 import { requestStage } from './request-log.js';
+import type { StageObservation } from './observability.js';
 import { runAgent } from './agent.js';
 import { createModelProvider } from './model.js';
-import { createTavilySearch } from './search.js';
+import type { ModelProvider } from './model.js';
+import { modelFailureDiagnostic } from './model.js';
+import { createStreamingModelProvider } from './streaming-model.js';
+import { createTavilySearch, SearchSession, type WebSearch } from './search.js';
 import { SseResponse, agentErrorCode } from './sse.js';
 import {
   APP_NAME,
@@ -78,6 +82,10 @@ export interface BuildServerOptions {
   logStream?: Writable;
   /** Injectable network boundary for offline integration tests; factories still validate config. */
   fetchImpl?: typeof fetch;
+  /** Injectable provider for HTTP reliability tests; production uses the SDK stream adapter. */
+  provider?: ModelProvider;
+  search?: WebSearch;
+  modelTimeoutMs?: number;
 }
 
 declare module 'fastify' {
@@ -249,9 +257,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
-  const memory = installMemoryHttp(app, options.memoryDirectory, config.NODE_ENV !== 'production' || process.env.DEBUG_MEMORY === '1');
-  app.addHook('onReady', async () => { app.log.info({ stage: 'memory_startup', pid: process.pid,
-    cwd: process.cwd(), absolutePath: resolve(options.memoryDirectory ?? '.recall-data') }, 'Memory storage ready'); });
+  const memoryDirectory = resolve(options.memoryDirectory ?? config.MEMORY_DIRECTORY);
+  const defaultDirectory = resolve(import.meta.dirname, '..', '.data', 'conversations');
+  const memory = installMemoryHttp(app, memoryDirectory, config.NODE_ENV !== 'production' || config.DEBUG_MEMORY === '1',
+    !options.memoryDirectory && memoryDirectory === defaultDirectory);
+  app.addHook('onReady', async () => { app.log.info({ event: 'memory_startup', reqId: 'startup', pid: process.pid,
+    cwd: process.cwd(), absolutePath: memoryDirectory }, 'Memory storage ready'); });
   app.post('/api/chat', async (request, reply) => memory.track((async () => {
     const contentType = request.headers['content-type'];
     if (contentType && !contentType.toLowerCase().includes('application/json')) {
@@ -288,8 +299,8 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     let provider;
     let search;
     try {
-      provider = createModelProvider(config, options.fetchImpl);
-      search = createTavilySearch(config, options.fetchImpl);
+      provider = options.provider ?? (options.fetchImpl ? createModelProvider(config, options.fetchImpl) : createStreamingModelProvider(config));
+      search = options.search ?? createTavilySearch(config, options.fetchImpl);
     } catch {
       return reply.status(503).send(buildErrorResponse('CHAT_NOT_CONFIGURED',
         'Chat requires a supported Azure model configuration and Tavily credentials.', request.id,
@@ -299,13 +310,22 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     request.executionSignal.throwIfAborted();
     const conversation = await store.resolveClientConversation(parsed.data.conversationId ?? randomUUID(), parsed.data.timezone);
     const conversationId = parsed.data.conversationId ?? conversation.id;
-    requestStage(request, conversation.id, 'request_received', request.executionStartedAt, { clientConversationId: conversationId });
+    requestStage(request, conversation.id, 'request_received', request.executionStartedAt);
     if (memory.executing.has(conversation.id)) throw new MemoryError('CONFLICT');
     memory.executing.add(conversation.id);
     let turnId: string | undefined;
     let attemptId: string | undefined;
     let awaitingReceipt = false;
     let storageFailure: 'STORAGE' | 'TIMEOUT' = 'STORAGE';
+    let agentObservation: StageObservation | undefined;
+    const sent = (outcome: string) => {
+      requestStage(request, conversation.id, 'response_sent', request.executionStartedAt, { outcome });
+      if (agentObservation) {
+        request.log.info({ requestId: request.id, conversationId: conversation.id, ...agentObservation }, 'Agent stage completed');
+        agentObservation = undefined;
+      }
+      memory.executing.delete(conversation.id);
+    };
     try {
       request.executionSignal.throwIfAborted();
       if (parsed.data.history) await store.seed(conversation.id, parsed.data.history);
@@ -313,6 +333,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       const turn = await store.addTurn(conversation.id, { key: parsed.data.turn?.key ?? randomUUID(),
         content: parsed.data.message, timezone: parsed.data.timezone ?? conversation.timezone ?? 'UTC' });
       turnId = turn.id;
+      await store.flush();
       const persisted = await store.diagnostics();
       requestStage(request, conversation.id, 'user_message_persisted', request.executionStartedAt,
         { conversationCount: persisted.conversationCount, messageCount: persisted.messageCount, absolutePath: store.directory });
@@ -345,19 +366,39 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         const owner = stream;
         const { turn: _turn, ...agentInput } = parsed.data;
         const retrievalStarted = performance.now();
-        const intent = recallIntent(turn.user.content);
+        const intent = requestRecallIntent(turn.user.content);
         requestStage(request, conversation.id, 'recall_intent', retrievalStarted,
           { detected: intent.recall, memoryOnly: intent.memoryOnly, why: intent.recall ? 'lexical recall cue' : 'no recognized recall cue' });
-        const historical = await retrieveMemory(store, { query: turn.user.content, activeConversationId: conversation.id, currentTurnId: turn.id,
+        const liveResearch = !options.fetchImpl && !isNewPersonalFact(turn.user.content) &&
+          (isExternalRequest(turn.user.content) || /\b(?:research|search|look up|recommend)\b/i.test(turn.user.content));
+        const measuredSearch = async (query: string, input: Parameters<typeof search>[1]) => {
+          const started = performance.now(); requestStage(request, conversation.id, 'web_search_start', started);
+          try { await owner.progress(liveResearch ? 'research_started' : 'search_started'); input.signal.throwIfAborted(); return await search(query, input); }
+          finally { requestStage(request, conversation.id, 'web_search_end', started); }
+        };
+        const prefetchedSearch = liveResearch ? new SearchSession(measuredSearch, request.executionSignal,
+          request.executionStartedAt, (event) => request.log.info({ requestId: request.id, conversationId: conversation.id, ...event }, 'Agent stage completed'), turn.user.content) : undefined;
+        const researchPromise = prefetchedSearch?.runRound([[turn.user.content.slice(0, 500)]]) ?? Promise.resolve([]);
+        let retrievalDurationMs = 0;
+        const [historical, prefetchedOutcomes] = await Promise.all([retrieveMemory(store, { query: turn.user.content, activeConversationId: conversation.id, currentTurnId: turn.id,
           referenceInstant: turn.user.timestamp, timezone: turn.timezone ?? conversation.timezone ?? 'UTC',
-          signal: request.executionSignal, startedAt: request.executionStartedAt, deadlineMs: config.REQUEST_DEADLINE_MS });
+          signal: request.executionSignal, startedAt: request.executionStartedAt, deadlineMs: config.REQUEST_DEADLINE_MS, alwaysRetrieve: true })
+          .then((value) => { retrievalDurationMs = performance.now() - retrievalStarted; return value; }), researchPromise]);
         requestStage(request, conversation.id, 'retrieval', retrievalStarted, { conversationsScanned: historical.conversationsScanned,
+          durationMs: Math.round(retrievalDurationMs * 100) / 100,
           messagesScanned: historical.messagesScanned, status: historical.status,
-          hits: historical.records.map((r) => ({ score: r.score, conversationId: r.conversationId, preview: r.user.content.slice(0, 80) })) });
+          hits: historical.records.slice(0, 8).map((r) => ({ score: r.score, conversationId: r.conversationId,
+            preview: config.DEBUG_MEMORY === '1' ? r.user.content.slice(0, 80) : '[enable DEBUG_MEMORY=1 for local excerpts]' })) });
         const history = authoritativeHistory((await store.load(conversation.id))!, parsed.data.history ?? [], turn.ordinal);
         request.executionSignal.throwIfAborted();
         const result = await runAgent({ ...agentInput, history, message: turn.user.content }, {
           memory: historical,
+          ...(!options.fetchImpl ? { allowWeb: liveResearch } : {}),
+          prefetchedSearch,
+          prefetchedIssues: prefetchedOutcomes.flat().filter((outcome) => !['ok', 'duplicate'].includes(outcome.status)).map((outcome) => `search_${outcome.status}`),
+          recoverRecall: !options.fetchImpl || !!options.provider,
+          modelTimeoutMs: options.modelTimeoutMs ?? (!options.fetchImpl ? 15_000 : undefined),
+          onText: async (text) => { await owner.delta(text); },
           provider: { contextWindowTokens: provider.contextWindowTokens, complete: async (input) => {
             const started = performance.now();
             const characters = input.messages.reduce((n, m) => n + m.content.length, 0);
@@ -369,25 +410,29 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
               requestStage(request, conversation.id, 'model_call_end', started, { errorCode: null, errorMessage: null });
               return response;
             } catch (error) {
-              requestStage(request, conversation.id, 'model_call_end', started, { errorCode: input.signal.aborted ? 'TIMEOUT_OR_ABORT' : 'MODEL_FAILED',
-                errorMessage: input.signal.aborted ? 'Model deadline or cancellation' : 'Provider operation failed' });
+              const diagnostic = modelFailureDiagnostic(error);
+              requestStage(request, conversation.id, 'model_call_end', started, { errorCode: input.signal.aborted ? 'TIMEOUT_OR_ABORT' : diagnostic?.code ?? 'MODEL_FAILED',
+                errorMessage: input.signal.aborted ? 'Model deadline or cancellation' : diagnostic?.httpStatus ? `Provider HTTP ${diagnostic.httpStatus}` : 'Provider operation failed',
+                ...(diagnostic ? { diagnostic } : {}) });
               throw error;
             }
           } },
-          search: async (query, input) => {
-            const started = performance.now(); requestStage(request, conversation.id, 'web_search_start', started);
-            try { await owner.progress('search_started'); input.signal.throwIfAborted(); return await search(query, input); }
-            finally { requestStage(request, conversation.id, 'web_search_end', started); }
-          },
+          search: measuredSearch,
           signal: request.executionSignal, startedAt: request.executionStartedAt,
           deadlineMs: config.REQUEST_DEADLINE_MS,
-          observe: (event) => request.log.info({ requestId: request.id, conversationId: conversation.id, ...event }, 'Agent stage completed'),
+          observe: (event) => {
+            if (event.stage === 'agent') agentObservation = event;
+            else request.log.info({ requestId: request.id, conversationId: conversation.id, ...event }, 'Agent stage completed');
+          },
         });
         if (result.reason === 'answer') {
           const answer = ChatResultSchema.parse({
             message: { id: randomUUID(), role: 'assistant', content: result.answer, timestamp: new Date().toISOString() },
             coverage: result.status === 'completed' ? 'complete' : 'partial', issues: result.issues,
             sources: result.sources.map(({ text: _text, ...metadata }) => metadata), evidenceCheck: 'citation_ids_only',
+            ...(historical.recall && historical.records.length ? { memory: {
+              earlierConversations: new Set(historical.records.filter((r) => r.conversationId !== conversation.id).map((r) => r.conversationId)).size,
+              fallback: !!result.answer?.includes('The model was unavailable;') } } : {}),
           });
           request.executionSignal.throwIfAborted();
           const saved = await store.saveGenerated(conversation.id, turn.id, attempt.id, { result: answer, evidence: result.sources });
@@ -395,13 +440,13 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
           await store.markAwaitingReceipt(conversation.id, turn.id, attempt.id);
           awaitingReceipt = true;
           request.executionSignal.throwIfAborted();
+          sent('answer');
           stream.complete(saved.answer!.result);
-          requestStage(request, conversation.id, 'response_sent', request.executionStartedAt, { outcome: 'answer' });
         } else {
           await store.stopAttempt(conversation.id, turn.id, attempt.id,
             result.reason === 'cancelled' ? 'cancelled' : 'failed', result.reason === 'deadline' || result.reason === 'model_timeout' ? 'TIMEOUT' : 'MODEL_FAILED');
+          sent(result.reason);
           stream.fail(agentErrorCode(result.reason));
-          requestStage(request, conversation.id, 'response_sent', request.executionStartedAt, { outcome: result.reason });
         }
       } catch (error) {
         if (error instanceof ExecutionTimeoutError) storageFailure = 'TIMEOUT';
@@ -415,6 +460,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
           request.executionSignal.aborted ? 'cancelled' : 'failed', request.executionSignal.aborted ? 'CANCELLED' : storageFailure);
       } catch { request.log.error({ requestId: request.id }, 'Conversation finalization failed'); }
       memory.executing.delete(conversation.id);
+      if (agentObservation) request.log.info({ requestId: request.id, conversationId: conversation.id, ...agentObservation }, 'Agent stage completed');
     }
   })()));
 

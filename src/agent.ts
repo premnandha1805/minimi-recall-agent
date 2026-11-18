@@ -3,12 +3,13 @@ import { memoryData, prepareAgentContext, isMemoryUpdate, type RetrievedMemory }
 import { z } from 'zod';
 import { createTemporalResolver } from './dates.js';
 import { ChatRequestSchema, citationIds, MAX_MESSAGE_CHARS, type ChatRequest } from './contracts.js';
-import { createDeadlineScope, ExecutionTimeoutError, runWithSignal } from './execution.js';
+import { createDeadlineScope, createFirstTokenScope, ExecutionTimeoutError, runWithSignal } from './execution.js';
 import { contextFits, ModelResponseSchema, type ModelMessage, type ModelProvider, type ModelResponse } from './model.js';
 import { AGENT_SYSTEM_PROMPT } from './prompts.js';
 import { abortOutcome, observeStage, sourceCounts, tokenUsage, type StageObserver, type StageOutcome, type ValidationCategory } from './observability.js';
 import { SEARCH_LIMITS, SearchArgumentsSchema, SearchSession, WEB_SEARCH_TOOL, type Source, type WebSearch } from './search.js';
 import { groundedRecallAnswer, groundHistoricalProse } from './recall-answer.js';
+import { modelFailureDiagnostic, type ModelFailureDiagnostic } from './model.js';
 
 /** Select one exact contiguous excerpt; never join separated claims into a quotation. */
 function excerpt(text: string, query: string, size: number, preserveLineStart = false): string {
@@ -145,11 +146,11 @@ function groundMixedMemoryAnswer(answer: string, memory: RetrievedMemory): strin
   return replacementShown ? grounded : answer;
 }
 
-export const AGENT_LIMITS = Object.freeze({ deadlineMs: 25_000, modelTimeoutMs: 10_000,
+export const AGENT_LIMITS = Object.freeze({ deadlineMs: 25_000, modelTimeoutMs: 15_000,
   modelCalls: 3, maxOutputTokens: 2048, totalOutputTokens: 6144 });
 const RunOptionsSchema = z.strictObject({
   deadlineMs: z.number().int().min(1).max(AGENT_LIMITS.deadlineMs).default(AGENT_LIMITS.deadlineMs),
-  modelTimeoutMs: z.number().int().min(1).max(AGENT_LIMITS.modelTimeoutMs).default(AGENT_LIMITS.modelTimeoutMs),
+  modelTimeoutMs: z.number().int().min(1).max(AGENT_LIMITS.modelTimeoutMs).default(10_000),
   outputTokenBudget: z.number().int().min(1).max(AGENT_LIMITS.totalOutputTokens).default(AGENT_LIMITS.totalOutputTokens),
 });
 export type AgentStopReason = 'answer' | 'empty_output' | 'invalid_request' | 'invalid_response' |
@@ -177,6 +178,12 @@ export interface AgentOptions {
   modelTimeoutMs?: number;
   outputTokenBudget?: number;
   observe?: StageObserver;
+  /** HTTP recovery: one answer call normally, one shorter retry only for transient failures. */
+  recoverRecall?: boolean;
+  onText?: (text: string) => void | Promise<void>;
+  allowWeb?: boolean;
+  prefetchedSearch?: SearchSession;
+  prefetchedIssues?: string[];
 }
 
 export async function runAgent(input: ChatRequest, options: AgentOptions): Promise<AgentResult> {
@@ -200,8 +207,8 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       !Number.isInteger(options.provider.contextWindowTokens) || options.provider.contextWindowTokens < 4096 ||
       options.provider.contextWindowTokens > 1_000_000) { observeTotal(); return result; }
   const deadline = createDeadlineScope(options.signal, Math.max(0, limits.data.deadlineMs - (now - startedAt)));
-  const search = new SearchSession(options.search, deadline.signal, startedAt, options.observe, parsed.data.message);
-  const issues = new Set<string>();
+  const search = options.prefetchedSearch ?? new SearchSession(options.search, deadline.signal, startedAt, options.observe, parsed.data.message);
+  const issues = new Set<string>(options.prefetchedIssues);
   const seenCallIds = new Set<string>();
   const shownSources = new Set<string>();
   const shownBodies = new Map<string, string>();
@@ -214,8 +221,16 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       content: JSON.stringify({ timestamp: message.timestamp, content: message.content }) })),
     { role: 'user', content: parsed.data.message },
   ];
-  let toolsEnabled = !options.memory?.memoryOnly;
+  let toolsEnabled = !options.memory?.memoryOnly && options.allowWeb !== false;
   const finish = (reason: AgentStopReason, answer?: string): AgentResult => {
+    if (options.recoverRecall && options.memory?.records.length &&
+        ['model_timeout', 'provider_error', 'empty_output', 'invalid_response', 'output_limit', 'context_limit'].includes(reason) &&
+        !options.signal.aborted) {
+      reason = 'answer';
+      answer = groundedRecallAnswer('{}', options.memory, parsed.data.message) +
+        '\n\nThe model was unavailable; this answer quotes the saved evidence directly.' +
+        (options.memory.memoryOnly ? '' : ' Fresh external information could not be completed.');
+    }
     result.reason = reason;
     result.status = reason === 'cancelled' ? 'cancelled' :
       reason === 'answer' ? (issues.size ? 'partial' : 'completed') : 'failed';
@@ -233,7 +248,10 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
     deadline.signal.throwIfAborted();
     if (options.memory) {
       const memory = options.memory;
-      if (memory.memoryOnly && memory.status === 'not_found') return finish('answer', 'I did not find a suitable record in the stored conversations. No historical details have been inferred.');
+      if (memory.memoryOnly && memory.status === 'not_found') return finish('answer', options.recoverRecall ?
+        (memory.earlierConversationCount ? `I searched ${memory.earlierConversationCount} earlier conversations and could not find that. That does not mean you never mentioned it.` :
+          'There is no saved history yet for this question. Your current message has been saved.') :
+        'I did not find a suitable record in the stored conversations. No historical details have been inferred.');
       if (memory.memoryOnly && memory.status === 'unsupported_date') return finish('answer', 'The historical date reference is ambiguous or unsupported. Please specify an ISO date or a supported calendar expression and timezone.');
       if (memory.memoryOnly && memory.status === 'ambiguous' && !memory.records.length) return finish('answer', memory.limitation ?? 'Which topic or date do you mean?');
       if (memory.memoryOnly && memory.status === 'limited' && (!memory.groundedRecall || !memory.records.length)) return finish('answer', memory.limitation ?? 'Historical coverage is limited. Please narrow the date or topic.');
@@ -245,18 +263,27 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
     }
     const changeRequest = !options.memory?.memoryOnly && isChangeRequest(parsed.data.message);
     if (changeRequest) messages.splice(1, 0, { role: 'system', content: COMPARISON_INSTRUCTIONS });
+    if (options.prefetchedSearch?.sources.length) {
+      messages.push({ role: 'user', content: JSON.stringify({ untrustedWebSearchData: options.prefetchedSearch.sources }) });
+      for (const source of options.prefetchedSearch.sources) { shownSources.add(source.id); shownBodies.set(source.text, source.id); }
+    }
     for (let step = 0; step < AGENT_LIMITS.modelCalls; step++) {
       if (performance.now() - startedAt >= limits.data.deadlineMs) return finish('deadline');
       deadline.signal.throwIfAborted();
       const remaining = limits.data.outputTokenBudget - result.stats.reservedOutputTokens;
       if (remaining <= 0) return finish('output_budget');
       const maxOutputTokens = Math.min(AGENT_LIMITS.maxOutputTokens, remaining);
-      const tools = toolsEnabled && step < SEARCH_LIMITS.rounds ? [WEB_SEARCH_TOOL] : [];
+      const tools = toolsEnabled && step < SEARCH_LIMITS.rounds && search.rounds < SEARCH_LIMITS.rounds ? [WEB_SEARCH_TOOL] : [];
       if (!contextFits({ messages, tools, maxOutputTokens }, options.provider.contextWindowTokens)) return finish('context_limit');
-      const modelScope = createDeadlineScope(deadline.signal, limits.data.modelTimeoutMs);
+      // Keep time for a shorter retry, deterministic grounding, atomic saves and SSE.
+      const availableMs = limits.data.deadlineMs - (performance.now() - startedAt) - (options.recoverRecall ? 1200 : 0);
+      const modelScope = options.recoverRecall && options.onText ? createFirstTokenScope(deadline.signal,
+        Math.max(0, availableMs), limits.data.modelTimeoutMs) :
+        { ...createDeadlineScope(deadline.signal, Math.max(0, Math.min(limits.data.modelTimeoutMs, availableMs))), markFirstToken: () => {} };
       let response: ModelResponse | undefined;
       let modelStartedAt: number | undefined;
       let modelOutcome: StageOutcome = 'failure';
+      let modelFailure: ModelFailureDiagnostic | undefined;
       try {
         const raw = await runWithSignal(modelScope.signal, () => {
           modelStartedAt = performance.now();
@@ -264,7 +291,8 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
           // Reserve the maximum even if usage is absent or a request fails. No hidden retries.
           result.stats.reservedOutputTokens += maxOutputTokens;
           return options.provider.complete({ messages: structuredClone(messages), tools: structuredClone(tools),
-            maxOutputTokens, signal: modelScope.signal });
+            maxOutputTokens, signal: modelScope.signal, onFirstToken: modelScope.markFirstToken,
+            ...(options.onText ? { onText: async (text) => { modelScope.signal.throwIfAborted(); modelScope.markFirstToken(); await options.onText!(text); } } : {}) });
         });
         deadline.signal.throwIfAborted();
         const validated = ModelResponseSchema.safeParse(raw);
@@ -272,15 +300,34 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
         response = validated.data;
         // Success here means a valid provider response, not factual/citation verification.
         modelOutcome = 'success';
-      } catch {
+      } catch (error) {
         modelOutcome = abortOutcome(modelScope.signal);
+        if (modelOutcome === 'failure') modelFailure = modelFailureDiagnostic(error);
         if (deadline.signal.aborted) deadline.signal.throwIfAborted();
+        const transient = modelScope.signal.reason instanceof ExecutionTimeoutError ||
+          modelFailure?.httpStatus !== undefined && modelFailure.httpStatus >= 500;
+        if (options.recoverRecall && step === 0 && transient &&
+            limits.data.deadlineMs - (performance.now() - startedAt) > 1800) {
+          // No LLM classifier/validator: retry this same answer once with less history.
+          const shortened = options.memory ? prepareAgentContext({ ...options.memory,
+            records: options.memory.records.slice(-2).map((r) => ({ ...r, evidence: [], assistant: undefined,
+              user: { ...r.user, content: r.user.content.slice(0, 800) } })) }, parsed.data.message,
+            options.provider.contextWindowTokens, maxOutputTokens).messages : [];
+          if (shortened.length) messages = shortened;
+          else messages = [messages[0], { role: 'user', content: parsed.data.message }];
+          continue;
+        }
+        if (options.recoverRecall && options.memory?.records.length && options.memory.memoryOnly) {
+          return finish('answer', groundedRecallAnswer('{}', options.memory, parsed.data.message) +
+            '\n\nThe model was unavailable; this answer quotes the saved evidence directly.');
+        }
         return finish(modelScope.signal.reason instanceof ExecutionTimeoutError ? 'model_timeout' : 'provider_error');
       } finally {
         modelScope.dispose();
         if (modelStartedAt !== undefined) {
           const modelEndedAt = performance.now();
-          const metrics = { outcome: modelOutcome, call: result.stats.modelCalls, usage: tokenUsage(response?.usage) };
+          const metrics = { outcome: modelOutcome, call: result.stats.modelCalls, usage: tokenUsage(response?.usage),
+            ...(modelFailure ? { modelFailure } : {}) };
           observeStage(options.observe, modelStartedAt, { stage: 'model_call', ...metrics }, modelEndedAt);
           // Known before execution when tools are disabled, otherwise identified from
           // an answer response. A failed tool-enabled call has no inferable purpose.

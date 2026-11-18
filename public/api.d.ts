@@ -81,6 +81,7 @@ export function sendChatRequest(
     maxHistoryItems?: number;
     maxBodyBytes?: number;
     onProgress?: (progress: import('../src/contracts.js').ChatEventPayloads['progress']) => void;
+    onDelta?: (text: string) => void;
   },
 ): Promise<ChatApiResult>;
 
@@ -88,6 +89,7 @@ export function validChatEvent(event: string, value: unknown): boolean;
 export function readChatStream(response: Response, options?: {
   signal?: AbortSignal;
   onProgress?: (progress: import('../src/contracts.js').ChatEventPayloads['progress']) => void;
+  onDelta?: (text: string) => void;
 }): Promise<{ meta: import('../src/contracts.js').ChatEventPayloads['meta'];
   result?: import('../src/contracts.js').ChatResult;
   error?: import('../src/contracts.js').ChatEventPayloads['error'] }>;

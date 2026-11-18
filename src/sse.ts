@@ -6,8 +6,8 @@ import type { AgentStopReason } from './agent.js';
 
 export const STREAM_ERROR_MESSAGES: Record<StreamErrorCode, string> = {
   REQUEST_TIMEOUT: 'Request deadline exceeded. No answer was accepted.',
-  MODEL_TIMEOUT: 'The model request timed out. No answer was accepted.',
-  MODEL_FAILED: 'The model request failed. No answer was accepted.',
+  MODEL_TIMEOUT: 'The response took too long. Your message is saved. Please retry.',
+  MODEL_FAILED: 'I could not finish the response. Your message is saved. Please retry.',
   INVALID_MODEL_OUTPUT: 'The model returned an unusable answer. No answer was accepted.',
   INVALID_CITATION: 'The answer referenced an unknown source. No answer was accepted.',
   CONTEXT_LIMIT: 'The supplied conversation exceeds the model context limit.',
@@ -103,7 +103,7 @@ export class SseResponse {
       if (this.signal.aborted || !this.writable()) closed();
     });
   }
-  async progress(phase: 'model_started' | 'search_started'): Promise<void> {
+  async progress(phase: 'model_started' | 'search_started' | 'research_started'): Promise<void> {
     this.signal.throwIfAborted();
     if (this.terminal) throw new Error('SSE closed');
     const payload = phase === 'model_started' ? { phase, call: ++this.modelCalls } : { phase, attempt: ++this.searches };
@@ -118,6 +118,11 @@ export class SseResponse {
       outcome: result.coverage === 'complete' ? 'completed' : 'partial', messageId: result.message.id,
     });
     this.end(frame);
+  }
+  async delta(text: string): Promise<void> {
+    this.signal.throwIfAborted();
+    if (this.terminal) throw new Error('SSE closed');
+    this.write(encodeEvent('delta', { text })); await this.ready();
   }
   fail(code: StreamErrorCode): void {
     if (this.terminal || !this.writable()) return;

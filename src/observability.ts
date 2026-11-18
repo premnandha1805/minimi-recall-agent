@@ -1,5 +1,6 @@
 import { ExecutionTimeoutError } from './execution.js';
 import type { ModelResponse } from './model.js';
+import type { ModelFailureDiagnostic } from './model.js';
 import type { AgentStopReason } from './agent.js';
 
 /** Fixed rejection labels only; never include validation messages or model data. */
@@ -32,6 +33,8 @@ export interface StageObservation {
   stopReason?: AgentStopReason;
   validationCategory?: ValidationCategory;
   usage?: TokenUsage;
+  /** Model adapter's bounded diagnostic only, never provider text or secrets. */
+  modelFailure?: ModelFailureDiagnostic;
 }
 export type StageObserver = (event: StageObservation) => void;
 

@@ -220,9 +220,17 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
   const generic = !!options.alwaysRetrieve && isGenericMemoryQuestion(options.query);
   const intent = options.alwaysRetrieve ? requestRecallIntent(options.query) : recallIntent(options.query);
   const memory: RetrievedMemory = { ...intent, reference: { instant: options.referenceInstant, timezone: options.timezone }, status: 'not_found', records: [], matches: 0, groundedRecall: true };
+  const values: Conversation[] = [];
+  if (options.alwaysRetrieve && store.snapshot) {
+    check(); values.push(...await runWithSignal(options.signal, () => store.snapshot!(options.signal))); check();
+    memory.archiveSearched = true;
+    memory.conversationsScanned = values.filter((v) => v.id !== options.activeConversationId).length;
+    memory.earlierConversationCount = memory.conversationsScanned;
+    memory.messagesScanned = values.reduce((n, v) => n + v.seededMessages.length + v.turns.length, 0);
+  }
   memory.reference.localTime = new Intl.DateTimeFormat('en-GB', { timeZone: options.timezone, dateStyle: 'full', timeStyle: 'long' }).format(new Date(options.referenceInstant));
   const locator = historicalLocator(options.query);
-  const personal = isPersonalRecall(locator);
+  const personal = isPersonalRecall(locator) || !!options.alwaysRetrieve && /\bwho\b[^?!;.]{0,80}\bdid (?:i|we)\b|\bdo (?:i|we) have (?:meetings?|plans?)\b/i.test(locator);
   // In a personal question a date describes the event, not when it was stored.
   const hint = intent.recall && !personal ? dateHint(locator) : undefined;
   if (hint) {
@@ -239,8 +247,8 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
   }
   const broadChronology = generic || !!memory.temporal || /\b(?:what did (?:i|we) (?:discuss|ask)|summari[sz]e (?:our|my) (?:history|conversations?)|message.level|transcript)\b/i.test(locator);
   const candidates: Array<{ record: HistoricalRecord; score: number }> = [];
-  const values: Conversation[] = [];
-  if (!intent.recall && !options.alwaysRetrieve) {
+  if (values.length) { /* Already scanned before interpreting the lookup hints. */ }
+  else if (!intent.recall && !options.alwaysRetrieve) {
     check(); const active = await runWithSignal(options.signal, () => store.load(options.activeConversationId));
     check(); if (active) values.push(active);
   } else if (store.snapshot) {
@@ -307,6 +315,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
       before?.user.content ?? '', before?.assistant?.content ?? ''].join(' '));
   });
   const namedAnchors = [...locator.matchAll(/\b[A-Z][a-zA-Z0-9]+\b/g)].flatMap((match) => tokenize(match[0])).filter((term) => anchors.includes(term));
+  const identifierAnchors = options.alwaysRetrieve ? anchors.filter((term) => /\d/.test(term)) : [];
   const lexicalScores = anchors.length ? rankMemory(anchors, documents) : pool.map(() => 0);
   const scores = pool.map((r, i) => {
     if (!options.alwaysRetrieve) return intent.recall && anchors.length ? lexicalScores[i] : 1;
@@ -320,7 +329,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
   const recentMatches = new Map<string, HistoricalRecord[]>();
   pool.forEach((r, index) => {
     check();
-    if (!scores[index] || intent.recall && namedAnchors.some((term) => !documents[index].includes(term))) return;
+    if (!scores[index] || intent.recall && [...namedAnchors, ...identifierAnchors].some((term) => !documents[index].includes(term))) return;
     const ownTerms = new Set(keywords(`${r.user.content} ${personal ? '' : r.assistant?.content ?? ''}`));
     r.selection = anchors.length && !anchors.some((term) => ownTerms.has(term)) ? 'adjacent' : 'match';
     const previousMatches = recentMatches.get(r.conversationId) ?? [];
@@ -357,7 +366,11 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
   memory.matches = candidates.length;
   const maximum = intent.recall ? RETRIEVAL_LIMITS.selected : options.alwaysRetrieve ? Math.max(RETRIEVAL_LIMITS.selected,
     candidates.filter((c) => c.record.conversationId === options.activeConversationId).length) : RETRIEVAL_LIMITS.scannedRecords;
-  memory.records = candidates.slice(0, maximum).map((v) => {
+  const selectedCandidates = options.alwaysRetrieve && !intent.recall ? [
+    ...candidates.filter((c) => c.record.conversationId === options.activeConversationId),
+    ...candidates.filter((c) => c.record.conversationId !== options.activeConversationId).slice(0, RETRIEVAL_LIMITS.selected),
+  ] : candidates.slice(0, maximum);
+  memory.records = selectedCandidates.map((v) => {
     if (!options.alwaysRetrieve) return { ...v.record, score: v.score };
     const conversation = values.find((c) => c.id === v.record.conversationId);
     const nearby = neighbor(v.record, -1) ?? neighbor(v.record, 1);
@@ -365,7 +378,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
       conversationTitle: conversation?.turns[0]?.user.content.slice(0, 80) ?? conversation?.seededMessages[0]?.content.slice(0, 80) ?? 'Saved conversation',
       ...(nearby ? { neighbor: { role: nearby.user.role ?? 'user', content: nearby.user.content.slice(0, 300), timestamp: nearby.user.timestamp } } : {}) };
   });
-  if (candidates.length > maximum) memory.limitation = 'More matching whole turns exist than can be included. Narrow the date or topic.';
+  if (candidates.length > selectedCandidates.length) memory.limitation = 'More matching whole turns exist than can be included. Narrow the date or topic.';
   // Only consecutive turns on the same local day can form one discussion. A gap,
   // another conversation, or another day retains ambiguity, regardless of rank.
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: options.timezone, year: 'numeric', month: '2-digit', day: '2-digit' });

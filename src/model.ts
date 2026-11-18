@@ -28,6 +28,9 @@ export interface ModelRequest {
   tools: ModelTool[];
   maxOutputTokens: number;
   signal: AbortSignal;
+  /** Provisional text; final deterministic validation may replace it. */
+  onText?: (text: string) => void | Promise<void>;
+  onFirstToken?: () => void;
 }
 export const ModelResponseSchema = z.strictObject({
   text: z.string().max(MAX_MODEL_TEXT_CHARS),
@@ -46,11 +49,38 @@ export interface ModelProvider {
   complete(request: ModelRequest): Promise<ModelResponse>;
 }
 
+const providerCodes = ['NOT_CONFIGURED', 'HTTP_ERROR', 'NETWORK_ERROR', 'INVALID_RESPONSE', 'RESPONSE_TOO_LARGE', 'INVALID_REQUEST'] as const;
+const networkCodes = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT',
+  'UND_ERR_CONNECT_TIMEOUT', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'SELF_SIGNED_CERT_IN_CHAIN'] as const;
+export interface ModelFailureDiagnostic {
+  code: typeof providerCodes[number];
+  httpStatus?: number;
+  networkCode?: typeof networkCodes[number];
+}
 export class ModelProviderError extends Error {
-  constructor(readonly code: 'NOT_CONFIGURED' | 'HTTP_ERROR' | 'NETWORK_ERROR' | 'INVALID_RESPONSE' | 'RESPONSE_TOO_LARGE' | 'INVALID_REQUEST') {
+  constructor(readonly code: ModelFailureDiagnostic['code'], readonly httpStatus?: number,
+    readonly networkCode?: ModelFailureDiagnostic['networkCode']) {
     super(`Model provider: ${code}`);
     this.name = 'ModelProviderError';
   }
+}
+
+/** Only explicit local enum values and HTTP status numbers may reach logs.
+ * Never serialize upstream error text, bodies, headers, causes or endpoints. */
+export function modelFailureDiagnostic(error: unknown): ModelFailureDiagnostic | undefined {
+  try {
+    if (!(error instanceof ModelProviderError) || !providerCodes.includes(error.code)) return undefined;
+    return { code: error.code,
+      ...(Number.isInteger(error.httpStatus) && error.httpStatus! >= 400 && error.httpStatus! <= 599 ? { httpStatus: error.httpStatus } : {}),
+      ...(error.networkCode && networkCodes.includes(error.networkCode) ? { networkCode: error.networkCode } : {}) };
+  } catch { return undefined; }
+}
+function networkFailureCode(error: unknown): ModelFailureDiagnostic['networkCode'] {
+  try {
+    const candidate = error as { code?: unknown; cause?: { code?: unknown } };
+    const code = candidate?.cause?.code ?? candidate?.code;
+    return networkCodes.find((allowed) => allowed === code);
+  } catch { return undefined; }
 }
 
 /** Conservative UTF-8 byte upper bound plus room for message framing; no tokenizer claim. */
@@ -147,12 +177,12 @@ export function createModelProvider(config: AppConfig, fetchImpl: typeof fetch =
             model: deployment, messages, stream: false, max_completion_tokens: request.maxOutputTokens,
             ...(request.tools.length ? {
               tools: request.tools.map((tool) => ({ type: 'function', function: tool })), tool_choice: 'auto',
-            } : { tool_choice: 'none' }),
+            } : request.messages.some((m) => m.role === 'tool') ? { tool_choice: 'none' } : {}),
           }),
         });
         if (!response.ok) {
           void response.body?.cancel().catch(() => {});
-          throw new ModelProviderError('HTTP_ERROR');
+          throw new ModelProviderError('HTTP_ERROR', response.status);
         }
         if (!response.headers.get('content-type')?.toLowerCase().includes('application/json')) {
           void response.body?.cancel().catch(() => {});
@@ -176,7 +206,7 @@ export function createModelProvider(config: AppConfig, fetchImpl: typeof fetch =
         if (request.signal.aborted) throw request.signal.reason;
         if (error instanceof ModelProviderError) throw error;
         // Network/body-reader errors can contain URLs or credentials. Do not forward them.
-        throw new ModelProviderError('NETWORK_ERROR');
+        throw new ModelProviderError('NETWORK_ERROR', undefined, networkFailureCode(error));
       });
     },
   };
