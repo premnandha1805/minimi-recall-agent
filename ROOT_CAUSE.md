@@ -35,6 +35,9 @@ error mentioned tools; omitting it → HTTP 200 in 1,932 ms with a completion.
 
 ### What changed
 
+See the [file-by-file guide](docs/live-memory-changes.md) for a short explanation
+of every changed implementation, test and script file.
+
 - **H1/H8 safeguards:** `addTurn` is awaited and the queue explicitly flushed
   before provider/search work. Assistant failures now have their own ISO-stamped
   message with `status: error`, separate from accepted answers. Retry identity is
