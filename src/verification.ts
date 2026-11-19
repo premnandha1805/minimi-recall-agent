@@ -29,6 +29,10 @@ export function isChangeRequest(query: string): boolean {
   return /\b(?:changed?|changes|still (?:correct|valid|accurate)|major new feature|new feature|feature launch|released|verify|recheck)\b/i.test(query) &&
     /\b(?:since|previous|earlier|last discussed|shortlist|shortlisted|our|we|your (?:previous|answer|recommendation)|(?:i|we) (?:asked|discussed)|what did (?:i|we))\b/i.test(query);
 }
+export function isRecallAndVerifyRequest(query: string): boolean {
+  return isChangeRequest(query) &&
+    /\b(?:what did (?:i|we) (?:ask|say|discuss)|what was (?:my|your|our) (?:question|answer|recommendation|advice)|remind me what (?:i|we)|what (?:did|had) (?:i|we) (?:asked|said))\b/i.test(query);
+}
 const Ref = z.strictObject({ sourceId: z.string().regex(/^S[1-9]\d*$/), quote: z.string().min(1).max(500) });
 const HistoricalRef = Ref.extend({ conversationId: z.uuid(), turnId: z.uuid() });
 const Candidate = z.strictObject({ kind: z.enum(['price', 'feature']), product: z.string().regex(/^[\p{L}\p{N}][\p{L}\p{N} .-]{0,79}$/u).optional(),
@@ -126,7 +130,10 @@ export function compareEvidence(candidate: z.infer<typeof Candidate>, memory: Re
   if (!record || record.provenance !== 'server_recorded' || !record.assistant || !ref || !candidate.current) return cannot('A supported historical baseline and current evidence are required.');
   const old = record.evidence.find((s) => s.id === ref.sourceId);
   const fresh = current.find((s) => s.id === candidate.current!.sourceId);
-  if (!old || !fresh || !quoteMatches(ref.quote, old.text) || !quoteMatches(candidate.current.quote, fresh.text)) return cannot('A cited quotation is missing or does not match the exact available evidence.');
+  if (!old || !fresh || !quoteMatches(ref.quote, old.text) || !quoteMatches(candidate.current.quote, fresh.text)) {
+    if (!old) return cannot('No authoritative historical baseline evidence was recorded for this item; current evidence cannot be compared against a verified prior price.');
+    return cannot('A cited quotation is missing or does not match the exact available evidence.');
+  }
   const before = extractFact(ref.quote); const after = extractFact(candidate.current.quote);
   if (![old, fresh].every((s, i) => s.text.split(/[\r\n]+/).some((line) => normalized(line) === normalized(i === 0 ? ref.quote : candidate.current!.quote)))) return cannot('The quote is not a standalone fully stated evidence record.');
   if (!before || !after || before.kind !== candidate.kind || after.kind !== candidate.kind) return cannot('Evidence lacks fully explicit supported facts; missing dimensions and qualifiers cannot be inferred.');
@@ -161,23 +168,99 @@ export function compareEvidence(candidate: z.infer<typeof Candidate>, memory: Re
   }
   return cannot('The facts cannot be compared.');
 }
+/** General-purpose extraction of historical shortlist items from comma lists,
+ * semicolon lists, markdown numbered/bullet lists, and markdown tables. */
+export function extractShortlistEntities(content: string): string[] {
+  const clean = content.normalize('NFC').trim();
+  const names = new Set<string>();
+  const addName = (raw: string) => {
+    let name = raw.replace(/\*\*/g, '').replace(/__/g, '').replace(/`/g, '').trim();
+    name = name.replace(/^(?:[0-9]+[.)]\s+|[-*•]\s+)/, '').trim();
+    name = name.replace(/\s*[-–—:(].*$/, '').trim();
+    name = name.replace(/[.,;!?]+$/, '').trim();
+    name = normalized(name);
+    if (name.length < 2 || name.length > 70) return;
+    if (!/^[\p{L}\p{N}][\p{L}\p{N} .+#-]*$/u.test(name)) return;
+    if (/\b(?:tool|tools|product|products|vendor|vendors|service|services|crm|database|databases|hosting|provider|providers|platform|platforms|option|options|shortlist|shortlisted|features?|pricing|plan|plans|status|overview|summary)\b/i.test(name)) return;
+    names.add(name);
+  };
+
+  // 1. Markdown tables: rows starting and ending with |
+  const tableRows = clean.split(/[\r\n]+/).map((l) => l.trim()).filter((l) => l.startsWith('|') && l.endsWith('|'));
+  for (const row of tableRows) {
+    const cells = row.split('|').map((c) => c.trim()).filter(Boolean);
+    if (!cells.length || cells.every((c) => /^:?-+:?$/.test(c))) continue;
+    if (cells.some((c) => /^(?:tool|product|crm|provider|name|service|database|platform|vendor)$/i.test(c))) continue;
+    addName(cells[0]);
+  }
+
+  // 2. Markdown bullet / numbered list items
+  const listLines = clean.split(/[\r\n]+/).map((l) => l.trim()).filter((l) => /^(?:[0-9]+[.)]|[-*•])\s+/u.test(l));
+  for (const line of listLines) addName(line);
+
+  // 3. Inline / delimited lists following shortlist keywords
+  for (const match of clean.matchAll(/(?:\b(?:shortlist(?:ed)?|tools?|providers?|options?|candidates?|recommendations?)(?:\s+(?:is|was|are|were|includes?|for[^:\n]*))?\s*:\s*|\bshortlisted\s+)([^\n.!?;]{1,500})/gi)) {
+    for (const item of match[1].split(/,|;|\band\b/i)) addName(item);
+  }
+
+  // 4. Lines with colons containing comma lists
+  for (const line of clean.split(/[\r\n]+/)) {
+    const colonIdx = line.indexOf(':');
+    if (colonIdx > 0 && colonIdx < 50) {
+      const header = line.slice(0, colonIdx);
+      if (/\b(?:shortlist|crm|tools?|products?|options?)\b/i.test(header)) {
+        for (const item of line.slice(colonIdx + 1).split(/,|;|\band\b/i)) addName(item);
+      }
+    }
+  }
+
+  // 5. Bare delimited lists if no list items were extracted
+  if (!names.size) {
+    const addList = (text: string) => {
+      const list = text.replace(/\.$/, '').split(/,|;|\band\b/i).map(normalized).filter(Boolean);
+      if (list.length < 2 || list.length > 20 || list.some((name) => !/^[\p{L}\p{N}][\p{L}\p{N} -]{0,79}$/u.test(name))) return;
+      for (const name of list) names.add(name);
+    };
+    for (const match of clean.matchAll(/(?:\bshortlist(?:ed)?(?: (?:is|was|includes))?\s*:\s*|\bshortlisted\s+)([^\n.!?]{1,500})/gi)) addList(match[1]);
+  }
+
+  return [...names];
+}
+
 /** Coverage names are locators, never proof of ownership or a historical fact.
  * Only explicit lists are enumerated; arbitrary prose is not treated as a shortlist. */
 function requestedProducts(memory: RetrievedMemory, query: string): string[] {
   const named = Object.keys(OFFICIAL_PRODUCTS).filter((name) => new RegExp(`\\b${name}\\b`, 'i').test(query));
   if (named.length && !/\b(?:shortlist|shortlisted|those|five|all)\b/i.test(query)) return named;
   const names = new Set<string>();
-  const addList = (text: string) => {
-    const list = text.replace(/\.$/, '').split(/,|;|\band\b/i).map(normalized).filter(Boolean);
-    if (list.length < 2 || list.length > 20 || list.some((name) => !/^[\p{L}\p{N}][\p{L}\p{N} -]{0,79}$/u.test(name))) return;
-    for (const name of list) names.add(name);
-  };
-  for (const record of memory.records) for (const content of [record.user.content, record.assistant?.content ?? '']) {
-    for (const match of content.matchAll(/(?:\bshortlist(?:ed)?(?: (?:is|was|includes))?\s*:\s*|\bshortlisted\s+)([^\n.!?]{1,500})/gi)) addList(match[1]);
-    if (content === record.assistant?.content && /\bshortlist\b/i.test(record.user.content)) addList(content);
-    if (names.size > 20) return []; // Do not silently enumerate only part of an oversized list.
+  for (const record of memory.records) {
+    for (const content of [record.user.content, record.assistant?.content ?? '']) {
+      for (const entity of extractShortlistEntities(content)) names.add(entity);
+      if (content === record.assistant?.content && /\bshortlist\b/i.test(record.user.content)) {
+        for (const entity of extractShortlistEntities(content)) names.add(entity);
+      }
+      if (names.size > 20) return []; // Do not silently enumerate only part of an oversized list.
+    }
   }
   return [...names];
+}
+
+export function formatRecallAndVerifyAnswer(memory: RetrievedMemory, verificationText: string, query: string): string {
+  const record = memory.records[0];
+  if (!record) return verificationText;
+  const userQ = record.user.content.trim();
+  const assistantA = record.assistant?.content.trim() ?? 'No previous assistant response recorded.';
+  let datePrefix = 'In our earlier discussion';
+  if (record.user.timestamp) {
+    try {
+      const d = new Date(record.user.timestamp);
+      datePrefix = `On ${d.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}`;
+    } catch { /* use fallback */ }
+  }
+  return `${datePrefix}, you asked: "${userQ}"\n\n` +
+    `Recorded response: "${assistantA}"\n\n` +
+    `Historical note: Past assistant responses reflect historical conversation records, not independently certified current facts.\n\n` +
+    `Current Verification Status:\n${verificationText}`;
 }
 export function verifyChangeAnswer(text: string, memory: RetrievedMemory, sources: Source[], incomplete = false, query = ''): string {
   const requested = memory.status === 'found' ? requestedProducts(memory, query) : [];

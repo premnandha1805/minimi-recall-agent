@@ -192,6 +192,8 @@ export function createTavilySearch(config: Pick<AppConfig, 'TAVILY_API_KEY'>, fe
 }
 
 /** Request-local budget owner. All calls from one model response share a round. */
+const PRIVATE_QUERY_PATTERN = /\b(?:my|our)\s+(?:[\p{L}\p{N}-]+\s+){0,2}(?:private|confidential|personal|meeting|appointment|interview|call|sister|brother|mother|father|wife|husband|doctor|password|secret|case|salary|wage|bonus)\b|\b(?:private|confidential)\s+(?:meeting|appointment|project|case)\b|[\w.+-]+@[\w.-]+\.\w+|\+?\d[\d ()-]{7,}\d/iu;
+
 export class SearchSession {
   readonly sources: Source[] = [];
   attempts = 0;
@@ -241,6 +243,7 @@ export class SearchSession {
         let status: SearchStatus;
         let documents: SearchDocument[] = [];
         if (this.seen.has(key)) status = 'duplicate';
+        else if (PRIVATE_QUERY_PATTERN.test(job.query)) status = 'failed';
         else if (!this.search) status = 'unavailable';
         else if (this.timedOut) status = 'timeout';
         else if (performance.now() - this.startedAt >= SEARCH_LIMITS.cutoffMs) status = 'cutoff';

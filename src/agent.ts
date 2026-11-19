@@ -1,4 +1,4 @@
-import { isChangeRequest, COMPARISON_INSTRUCTIONS, verifyChangeAnswer, checkSourceQuotations } from './verification.js';
+import { isChangeRequest, isRecallAndVerifyRequest, formatRecallAndVerifyAnswer, COMPARISON_INSTRUCTIONS, verifyChangeAnswer, checkSourceQuotations } from './verification.js';
 import { memoryData, prepareAgentContext, isMemoryUpdate, type RetrievedMemory } from './context.js';
 import { z } from 'zod';
 import { createTemporalResolver } from './dates.js';
@@ -226,6 +226,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
   let toolsEnabled = !options.memory?.memoryOnly && options.allowWeb !== false;
   const researchPolicy = createResearchPolicy(parsed.data.message, options.memory);
   const changeRequest = !options.memory?.memoryOnly && isChangeRequest(parsed.data.message);
+  const dualRecallVerify = changeRequest && isRecallAndVerifyRequest(parsed.data.message);
   // Suppress raw unvalidated tokens for pure recall, mixed recall, and change
   // comparisons so intermediate JSON or ungrounded historical claims never stream.
   const suppressRawStream = changeRequest || !!options.memory?.recall || !!options.memory?.memoryOnly;
@@ -375,9 +376,11 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
         let answer = response.text;
         // Historical citation markers are projected in model context; verify that
         // exact representation rather than the untouched on-disk snapshots.
-        if (changeRequest) answer = options.memory ? verifyChangeAnswer(response.text, memoryData(options.memory), search.sources, issues.size > 0, parsed.data.message) :
-          'Cannot verify: no supported historical baseline was supplied.';
-        else if (/(?<!no )\bconfirmed change\b/i.test(answer)) answer = 'Cannot verify: a change verdict was not established by deterministic evidence comparison.';
+        if (changeRequest) {
+          const verification = options.memory ? verifyChangeAnswer(response.text, memoryData(options.memory), search.sources, issues.size > 0, parsed.data.message) :
+            'Cannot verify: no supported historical baseline was supplied.';
+          answer = dualRecallVerify && options.memory ? formatRecallAndVerifyAnswer(options.memory, verification, parsed.data.message) : verification;
+        } else if (/(?<!no )\bconfirmed change\b/i.test(answer)) answer = 'Cannot verify: a change verdict was not established by deterministic evidence comparison.';
         if (!checkSourceQuotations(answer, search.sources)) answer = 'Cannot verify: quotation warning: a cited quotation did not match the exact available source text. No unsupported quotation or change claim is accepted.';
         if (options.memory?.memoryOnly) {
           if (options.memory.groundedRecall) {

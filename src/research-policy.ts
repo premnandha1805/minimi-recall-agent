@@ -1,4 +1,5 @@
 import type { RetrievedMemory } from './context.js';
+import { extractShortlistEntities } from './verification.js';
 
 const words = (text: string) => text.normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
 const privateClausePattern = /\b(?:my|our)\s+(?:[\p{L}\p{N}-]+\s+){0,2}(?:private|confidential|personal|meeting|appointment|interview|call|sister|brother|mother|father|wife|husband|doctor|password|secret|case)\b|\b(?:private|confidential)\s+(?:meeting|appointment|project|case)\b|[\w.+-]+@[\w.-]+\.\w+|\+?\d[\d ()-]{7,}\d/iu;
@@ -17,11 +18,11 @@ export function historicalResearchEntities(memory?: RetrievedMemory): string[] {
     if (!/\b(?:shortlist(?:ed)?|compar(?:e|ed|ing)|options)\b/i.test(topic) ||
         !/\b(?:tools?|products?|providers?|services?|frameworks?|platforms?|libraries|databases?|CRM)\b/i.test(topic)) continue;
     for (const content of [record.user.content, record.assistant?.content ?? '']) {
-      const list = content.match(/:\s*([^\n.!?;]+)/)?.[1] ?? (/^[\w .+#-]+(?:,\s*[\w .+#-]+){1,7}[.!]?$/u.test(content) ? content.replace(/[.!]$/, '') : '');
-      for (const candidate of list.split(/,|\s+and\s+/i)) {
-        const name = candidate.trim().replace(/^and\s+/i, '');
-        if (name.length < 2 || name.length > 70 || !/^[\p{L}\p{N}][\p{L}\p{N} .+#-]*$/u.test(name) || privateClausePattern.test(name)) continue;
-        entities.add(name); if (entities.size === 8) return [...entities];
+      for (const entity of extractShortlistEntities(content)) {
+        if (!privateClausePattern.test(entity)) {
+          entities.add(entity);
+          if (entities.size === 8) return [...entities];
+        }
       }
     }
   }
