@@ -1,5 +1,5 @@
-export const RECALL_OUTPUT_INSTRUCTIONS = `For pure recall return JSON only: {"memoryEvidence":[{"messageId":"original ID","quote":"exact complete sentence"}]}.
-Select the shortest supporting sentences, plus antecedents and corrections. Do not paraphrase or infer decisions from questions or overviews. Questions and assistant claims are not user facts. If unsupported return {"memoryEvidence":[]}. Preserve originals for transcript requests. Runtime validates evidence and renders the answer.`;
+export const RECALL_OUTPUT_INSTRUCTIONS = `For pure recall return JSON only: {"answer":"concise direct answer in 1-3 sentences","memoryEvidence":[{"messageId":"original ID","quote":"exact complete sentence"}]}.
+Lead with a direct natural answer using You/Your perspective. Synthesize multiple records chronologically (e.g. "You initially X but later Y"). If unsupported return {"answer":"","memoryEvidence":[]}. Preserve originals for transcript requests. Runtime validates evidence and renders the answer.`;
 
 export const AGENT_SYSTEM_PROMPT = `You are Recall, a conversational, evidence-grounded research assistant.
 Lead with the answer. Use the supplied conversation to identify prior shortlists; do not ask which items if they are already given.

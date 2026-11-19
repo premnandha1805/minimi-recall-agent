@@ -65,7 +65,7 @@ export function keywords(text: string): string[] {
     .filter((v) => !stopWords.has(v) && !/^\d+$/.test(v) && v.length > 1).map(stem);
 }
 const aliases: Readonly<Record<string, string>> = {
-  notebook: 'laptop', computer: 'laptop', call: 'meeting', interview: 'meeting', appointment: 'meeting',
+  notebook: 'laptop', computer: 'laptop', appointment: 'meeting',
   university: 'college', campus: 'college', app: 'project', assignment: 'project', db: 'database',
   job: 'work', office: 'work', purchase: 'buy', purchased: 'buy', bought: 'buy', selected: 'choose', select: 'choose',
 };
@@ -302,7 +302,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
   }
   const inDate = (r: HistoricalRecord) => memory.temporal?.status !== 'resolved' ||
     (Date.parse(r.user.timestamp) >= Date.parse(memory.temporal.startUtc) && Date.parse(r.user.timestamp) < Date.parse(memory.temporal.endUtcExclusive));
-  const relatedReference = (text: string) => /^(?:and|those|they|it|also|why|how|which one)\b|\b(?:this|that|those|these)\s+(?:topic|project|option|one|technology|idea)\b/i.test(text);
+  const relatedReference = (text: string) => /^(?:and|those|they|it|also|why|how|which one)\b|\b(?:this|that|those|these)\s+(?:topic|project|option|one|technology|idea)\b|\b(?:above|former|previous)\s+(?:company|choice|option|decision|interview|event|role|project)\b|\bthe\s+(?:other|same)\s+(?:one|option|company|project|technology|choice)\b|\b(?:that|this)\s+(?:company|interview|event|decision|choice|role)\b/i.test(text);
   const neighbors = new Map<string, HistoricalRecord>();
   for (const r of eligible) neighbors.set(`${r.conversationId}:${r.provenance}:${r.ordinal}`, r);
   const neighbor = (r: HistoricalRecord, delta: number) => neighbors.get(`${r.conversationId}:${r.provenance}:${r.ordinal + delta}`);
@@ -327,8 +327,10 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
     const chronological = broadChronology && !anchors.length;
     if (!lexicalScores[i] && !generic && !chronological) return 0;
     const ageDays = Math.max(0, (Date.parse(options.referenceInstant) - Date.parse(r.user.timestamp)) / 86_400_000);
-    const salient = /\d|\b[A-Z][a-z]{2,}\b/.test(r.user.content) ? 0.08 : 0;
-    return lexicalScores[i] + (generic || chronological ? 1 : 0) + 0.2 / (1 + ageDays) + salient;
+    const isQuestion = /\?\s*$/.test(r.user.content.trim()) || !isPersonalAssertion(r.user.content);
+    const salient = (/\d|\b[A-Z][a-z]{2,}\b/.test(r.user.content) && !isQuestion) ? 0.08 : 0;
+    const assertionWeight = (!isQuestion || broadChronology) ? 0.05 : -0.15;
+    return Math.max(0, lexicalScores[i] + (generic || chronological ? 1 : 0) + 0.2 / (1 + ageDays) + salient + assertionWeight);
   });
   const recentMatches = new Map<string, HistoricalRecord[]>();
   pool.forEach((r, index) => {
@@ -358,7 +360,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
         // A named different event must not inherit the previous event's identity.
         const kind = reference.user.content.match(/^(?:my|our|the|that)\s+(meeting|appointment|interview|call|event|plan)\b/i)?.[1];
         const antecedent = delta === -1 ? next : r;
-        if (kind && !keywords(antecedent.user.content).includes(stem(kind))) continue;
+        if (kind && !relatedReference(reference.user.content) && !keywords(antecedent.user.content).includes(stem(kind))) continue;
         if (personal && delta === -1 && !relatedReference(r.user.content)) continue;
         next.selection = 'adjacent'; selected.add(next);
         candidates.push({ record: next, score: anchor.score - 0.001 });
@@ -395,7 +397,7 @@ async function retrieveMemoryImpl(store: Pick<ConversationStore, 'list' | 'load'
       keywords(r.user.content).some((word) => previousTopics.has(word));
     if (!previous || r.provenance !== 'server_recorded' || previous.provenance !== 'server_recorded' ||
         r.conversationId !== previous.conversationId || r.ordinal !== previous.ordinal + 1 ||
-        (personal ? r.selection !== 'adjacent' : !related || day.format(new Date(r.user.timestamp)) !== day.format(new Date(previous.user.timestamp)))) discussions++;
+        (personal ? (r.selection !== 'adjacent' && !relatedReference(r.user.content)) : !related || day.format(new Date(r.user.timestamp)) !== day.format(new Date(previous.user.timestamp)))) discussions++;
   }
   memory.status = memory.limitation ? 'limited' : !memory.matches ? 'not_found' :
     intent.recall && discussions > 1 ? 'ambiguous' : 'found';
@@ -462,17 +464,27 @@ export function prepareAgentContext(memory: RetrievedMemory, query: string, cont
     while (selected.length > 1 && !fits(selected)) selected.shift();
     if (fits(selected)) return { messages: build(selected), limitation: `${memory.records.length - selected.length} older snippets omitted to keep memory context near 2,500 tokens.` };
   }
-  if (memory.recall) return { messages: [], limitation: 'The essential historical turns exceed the context limit. Narrow the date or topic; no shortlist was truncated.' };
   // Explicit shortlist references keep their whole original anchor even when old.
   const anchors = /\b(?:those|these|shortlist|five|options)\b/i.test(query) ? memory.records.filter((r) =>
     /\bshortlist(?:ed)?\b/i.test(`${r.user.content} ${r.assistant?.content ?? ''}`)) : [];
-  if (!fits(anchors)) return { messages: [], limitation: 'The essential shortlist turns exceed the context limit. Narrow the question; no shortlist was truncated.' };
-  const selected = [...anchors];
-  for (const record of [...memory.records].reverse()) {
-    if (selected.includes(record)) continue;
-    const next = memory.records.filter((r) => r === record || selected.includes(r));
-    if (!fits(next)) break;
-    selected.splice(0, selected.length, ...next);
+  if (anchors.length > 0) {
+    if (!fits(anchors)) return { messages: [], limitation: 'The essential shortlist turns exceed the context limit. Narrow the question; no shortlist was truncated.' };
+    const selected = [...anchors];
+    for (const record of [...memory.records].reverse()) {
+      if (selected.includes(record)) continue;
+      const next = memory.records.filter((r) => r === record || selected.includes(r));
+      if (!fits(next)) break;
+      selected.splice(0, selected.length, ...next);
+    }
+    return { messages: build(selected), limitation: `${memory.records.length - selected.length} older whole turns omitted from context.` };
   }
-  return { messages: build(selected), limitation: `${memory.records.length - selected.length} older whole turns omitted from context.` };
+  if (memory.recall) return { messages: [], limitation: 'The essential historical turns exceed the context limit. Narrow the date or topic; no shortlist was truncated.' };
+  const fallbackSelected = [...anchors];
+  for (const record of [...memory.records].reverse()) {
+    if (fallbackSelected.includes(record)) continue;
+    const next = memory.records.filter((r) => r === record || fallbackSelected.includes(r));
+    if (!fits(next)) break;
+    fallbackSelected.splice(0, fallbackSelected.length, ...next);
+  }
+  return { messages: build(fallbackSelected), limitation: `${memory.records.length - fallbackSelected.length} older whole turns omitted from context.` };
 }
