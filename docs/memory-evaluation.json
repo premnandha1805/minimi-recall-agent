@@ -6,7 +6,7 @@
       "expected": 1,
       "retrieved": 1,
       "relevant": 1,
-      "retrievalMs": 90.0028000000002,
+      "retrievalMs": 36.697599999999966,
       "grounded": true
     },
     {
@@ -14,7 +14,7 @@
       "expected": 1,
       "retrieved": 1,
       "relevant": 1,
-      "retrievalMs": 8.576199999999972,
+      "retrievalMs": 2.9762000000000626,
       "grounded": true
     },
     {
@@ -22,7 +22,7 @@
       "expected": 1,
       "retrieved": 1,
       "relevant": 1,
-      "retrievalMs": 5.332699999999932,
+      "retrievalMs": 1.6648000000000138,
       "grounded": true
     },
     {
@@ -30,7 +30,7 @@
       "expected": 1,
       "retrieved": 1,
       "relevant": 1,
-      "retrievalMs": 3.577299999999923,
+      "retrievalMs": 1.4958999999998923,
       "grounded": true
     },
     {
@@ -38,7 +38,7 @@
       "expected": 1,
       "retrieved": 1,
       "relevant": 1,
-      "retrievalMs": 3.8732999999997446,
+      "retrievalMs": 2.5800000000001546,
       "grounded": true
     },
     {
@@ -46,7 +46,7 @@
       "expected": 1,
       "retrieved": 1,
       "relevant": 1,
-      "retrievalMs": 7.910900000000311,
+      "retrievalMs": 2.046100000000024,
       "grounded": true
     },
     {
@@ -54,7 +54,7 @@
       "expected": 2,
       "retrieved": 2,
       "relevant": 2,
-      "retrievalMs": 3.4803000000001703,
+      "retrievalMs": 1.0942000000000007,
       "grounded": true
     },
     {
@@ -62,7 +62,7 @@
       "expected": 1,
       "retrieved": 1,
       "relevant": 1,
-      "retrievalMs": 4.786399999999958,
+      "retrievalMs": 1.900899999999865,
       "grounded": true
     },
     {
@@ -70,7 +70,7 @@
       "expected": 1,
       "retrieved": 1,
       "relevant": 1,
-      "retrievalMs": 2.3034999999999854,
+      "retrievalMs": 0.9975999999999203,
       "grounded": true
     },
     {
@@ -78,7 +78,7 @@
       "expected": 0,
       "retrieved": 0,
       "relevant": 0,
-      "retrievalMs": 2.507300000000214,
+      "retrievalMs": 1.190900000000056,
       "grounded": true
     }
   ],
@@ -88,10 +88,10 @@
     "relevantRetrievedConversations": 10,
     "unrelatedRetrievedConversations": 0,
     "groundedCases": 10,
-    "retrievalP50Ms": 4.786399999999958,
-    "retrievalP95Ms": 90.0028000000002,
+    "retrievalP50Ms": 1.900899999999865,
+    "retrievalP95Ms": 36.697599999999966,
     "mockedHttpMs": [
-      406.09370000000035
+      115.0661
     ]
   }
 }
