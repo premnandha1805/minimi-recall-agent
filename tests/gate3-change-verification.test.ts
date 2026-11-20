@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runAgent } from '../src/agent.js';
 import {
+  canonicalProductName,
+  checkSourceQuotations,
   compareEvidence,
   extractFact,
   extractShortlistEntities,
@@ -589,5 +591,78 @@ describe('Gate 3 — Additional safeguards: Privacy, bounds, and security', () =
     for (const chunk of streamedChunks) {
       expect(chunk).not.toContain('{"comparisons":');
     }
+  });
+
+  it('aggregates multi-dimensional comparisons per product, preserving denominator 5 and handling aliases and missing/irrelevant candidates', () => {
+    const assistantContent = `Here is our shortlist of 5 CRM tools for a 20-person sales team:\n1. HubSpot - Inbound marketing and CRM\n2. Pipedrive - Pipeline focus\n3. Close CRM - Inside sales\n4. Zoho CRM - Omnichannel\n5. Salesforce - Enterprise standard`;
+    const memory = memoryWithShortlist(assistantContent);
+
+    const hubspotPriceDoc = sourceDoc('S1', 'HubSpot', 'The hubspot Starter plan costs USD 30 per seat per month in the US, standard terms, effective 14 November 2026.', 'hubspot.com', '2026-11-15T00:00:00.000Z');
+    const hubspotFeatureDoc = sourceDoc('S2', 'HubSpot', 'On 14 November 2026, hubspot launched AI Agents.', 'hubspot.com', '2026-11-15T00:00:00.000Z');
+    const pipedrivePriceDoc = sourceDoc('S3', 'Pipedrive', 'The pipedrive Essential plan costs USD 25 per seat per month in the US, standard terms, effective 14 November 2026.', 'pipedrive.com', '2026-11-15T00:00:00.000Z');
+    const pipedriveFeatureDoc = sourceDoc('S4', 'Pipedrive', 'On 14 November 2026, pipedrive launched Nova.', 'pipedrive.com', '2026-11-15T00:00:00.000Z');
+    const closePriceDoc = sourceDoc('S5', 'Close', 'The close Standard plan costs USD 49 per seat per month in the US, standard terms, effective 14 November 2026.', 'close.com', '2026-11-15T00:00:00.000Z');
+    const salesforceDoc = sourceDoc('S6', 'Salesforce', 'The salesforce Starter plan costs USD 25 per seat per month in the US, standard terms, effective 14 November 2026.', 'salesforce.com', '2026-11-15T00:00:00.000Z');
+
+    const currentSources = [hubspotPriceDoc, hubspotFeatureDoc, pipedrivePriceDoc, pipedriveFeatureDoc, closePriceDoc, salesforceDoc];
+
+    const comparisons = [
+      { kind: 'price', product: 'HubSpot', current: { sourceId: 'S1', quote: hubspotPriceDoc.text } },
+      { kind: 'feature', product: 'HubSpot', current: { sourceId: 'S2', quote: hubspotFeatureDoc.text } },
+      { kind: 'price', product: 'Pipedrive', current: { sourceId: 'S3', quote: pipedrivePriceDoc.text } },
+      { kind: 'feature', product: 'Pipedrive', current: { sourceId: 'S4', quote: pipedriveFeatureDoc.text } },
+      { kind: 'price', product: 'Close', current: { sourceId: 'S5', quote: closePriceDoc.text } },
+      { kind: 'price', product: 'Salesforce', current: { sourceId: 'S6', quote: salesforceDoc.text } },
+      { kind: 'price', product: 'RandomTool', current: { sourceId: 'S1', quote: hubspotPriceDoc.text } },
+    ];
+
+    const query = 'Has any of our five shortlisted CRM tools changed pricing or shipped something important since our earlier discussion?';
+    const answer = verifyChangeAnswer(JSON.stringify({ comparisons }), memory, currentSources, false, query);
+
+    // 1. Assert exactly five distinct numbered product-level outcomes (1. through 5., no 6.)
+    const numberedSections = answer.split(/\n\n(?=\d+\.\s+)/).filter((s) => /^\d+\.\s+/.test(s));
+    expect(numberedSections).toHaveLength(5);
+
+    // 2. No duplicate product sections
+    expect(answer).toMatch(/1\.\s+Cannot verify — hubspot/);
+    expect(answer).toMatch(/2\.\s+Cannot verify — pipedrive/);
+    expect(answer).toMatch(/3\.\s+Cannot verify — close/);
+    expect(answer).toMatch(/4\.\s+Cannot verify — zoho/);
+    expect(answer).toMatch(/5\.\s+Cannot verify — salesforce/);
+
+    for (const prod of ['hubspot', 'pipedrive', 'close', 'zoho', 'salesforce']) {
+      const occurrences = [...answer.matchAll(new RegExp(`\\b${prod}:`, 'gi'))];
+      expect(occurrences).toHaveLength(1);
+    }
+
+    // 3. Zoho CRM is included even though it had no candidate
+    expect(answer).toContain('Cannot verify — zoho');
+    expect(answer).toContain('No supported evidence pair was supplied for this requested product');
+
+    // 4. Denominator = 5
+    expect(answer).toContain('Supported comparisons: 0 of 5');
+    expect(answer).toContain('Requested products supported: 0 of 5; unsupported (not comparable): 0; unverified: 5');
+
+    // 5. Irrelevant candidate 'RandomTool' does not appear or alter denominator
+    expect(answer).not.toContain('randomtool');
+
+    // 6. No fabricated price changes
+    expect(answer).not.toContain('Confirmed change');
+    expect(answer).not.toContain('No confirmed change');
+
+    // 7. Citation check passes
+    expect(checkSourceQuotations(answer, currentSources)).toBe(true);
+  });
+
+  it('resolves product aliases such as Zoho CRM / zoho and Close CRM / close consistently', () => {
+    const list = 'Shortlisted CRM tools: 1. HubSpot CRM, 2. Zoho CRM, 3. Pipedrive, 4. Close CRM, 5. Salesforce CRM';
+    const entities = extractShortlistEntities(list);
+    expect(entities).toEqual(['hubspot', 'zoho', 'pipedrive', 'close', 'salesforce']);
+
+    expect(canonicalProductName('Zoho CRM')).toBe('zoho');
+    expect(canonicalProductName('zoho')).toBe('zoho');
+    expect(canonicalProductName('Close CRM')).toBe('close');
+    expect(canonicalProductName('close')).toBe('close');
+    expect(canonicalProductName('Salesforce CRM')).toBe('salesforce');
   });
 });

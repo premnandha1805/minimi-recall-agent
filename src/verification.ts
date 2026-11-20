@@ -168,6 +168,27 @@ export function compareEvidence(candidate: z.infer<typeof Candidate>, memory: Re
   }
   return cannot('The facts cannot be compared.');
 }
+const genericCategoryTerms = new Set([
+  'tool', 'tools', 'product', 'products', 'vendor', 'vendors', 'service', 'services',
+  'crm', 'database', 'databases', 'hosting', 'provider', 'providers', 'platform', 'platforms',
+  'option', 'options', 'shortlist', 'shortlisted', 'feature', 'features', 'pricing', 'plan', 'plans',
+  'status', 'overview', 'summary',
+]);
+
+/** Canonical product name mapping across common aliases, category suffixes, and known official products. */
+export function canonicalProductName(raw: string): string {
+  const norm = normalized(raw);
+  for (const official of Object.keys(OFFICIAL_PRODUCTS)) {
+    if (norm === official) return official;
+    if (norm.startsWith(`${official} `) || norm.endsWith(` ${official}`)) return official;
+  }
+  const stripped = norm.replace(/\s+(?:crm|tools?|software|platform|suite)$/i, '').trim();
+  for (const official of Object.keys(OFFICIAL_PRODUCTS)) {
+    if (stripped === official) return official;
+  }
+  return stripped.length > 0 ? stripped : norm;
+}
+
 /** General-purpose extraction of historical shortlist items from comma lists,
  * semicolon lists, markdown numbered/bullet lists, and markdown tables. */
 export function extractShortlistEntities(content: string): string[] {
@@ -181,8 +202,9 @@ export function extractShortlistEntities(content: string): string[] {
     name = normalized(name);
     if (name.length < 2 || name.length > 70) return;
     if (!/^[\p{L}\p{N}][\p{L}\p{N} .+#-]*$/u.test(name)) return;
-    if (/\b(?:tool|tools|product|products|vendor|vendors|service|services|crm|database|databases|hosting|provider|providers|platform|platforms|option|options|shortlist|shortlisted|features?|pricing|plan|plans|status|overview|summary)\b/i.test(name)) return;
-    names.add(name);
+    const words = name.split(/\s+/);
+    if (words.every((w) => genericCategoryTerms.has(w))) return;
+    names.add(canonicalProductName(name));
   };
 
   // 1. Markdown tables: rows starting and ending with |
@@ -219,7 +241,7 @@ export function extractShortlistEntities(content: string): string[] {
     const addList = (text: string) => {
       const list = text.replace(/\.$/, '').split(/,|;|\band\b/i).map(normalized).filter(Boolean);
       if (list.length < 2 || list.length > 20 || list.some((name) => !/^[\p{L}\p{N}][\p{L}\p{N} -]{0,79}$/u.test(name))) return;
-      for (const name of list) names.add(name);
+      for (const name of list) addName(name);
     };
     for (const match of clean.matchAll(/(?:\bshortlist(?:ed)?(?: (?:is|was|includes))?\s*:\s*|\bshortlisted\s+)([^\n.!?]{1,500})/gi)) addList(match[1]);
   }
@@ -231,13 +253,13 @@ export function extractShortlistEntities(content: string): string[] {
  * Only explicit lists are enumerated; arbitrary prose is not treated as a shortlist. */
 function requestedProducts(memory: RetrievedMemory, query: string): string[] {
   const named = Object.keys(OFFICIAL_PRODUCTS).filter((name) => new RegExp(`\\b${name}\\b`, 'i').test(query));
-  if (named.length && !/\b(?:shortlist|shortlisted|those|five|all)\b/i.test(query)) return named;
+  if (named.length && !/\b(?:shortlist|shortlisted|those|five|all)\b/i.test(query)) return named.map(canonicalProductName);
   const names = new Set<string>();
   for (const record of memory.records) {
     for (const content of [record.user.content, record.assistant?.content ?? '']) {
-      for (const entity of extractShortlistEntities(content)) names.add(entity);
+      for (const entity of extractShortlistEntities(content)) names.add(canonicalProductName(entity));
       if (content === record.assistant?.content && /\bshortlist\b/i.test(record.user.content)) {
-        for (const entity of extractShortlistEntities(content)) names.add(entity);
+        for (const entity of extractShortlistEntities(content)) names.add(canonicalProductName(entity));
       }
       if (names.size > 20) return []; // Do not silently enumerate only part of an oversized list.
     }
@@ -263,13 +285,15 @@ export function formatRecallAndVerifyAnswer(memory: RetrievedMemory, verificatio
     `Current Verification Status:\n${verificationText}`;
 }
 export function verifyChangeAnswer(text: string, memory: RetrievedMemory, sources: Source[], incomplete = false, query = ''): string {
-  const requested = memory.status === 'found' ? requestedProducts(memory, query) : [];
+  const rawRequested = memory.status === 'found' ? requestedProducts(memory, query) : [];
+  const requested = [...new Set(rawRequested.map(canonicalProductName))];
   let input: unknown; try { input = JSON.parse(text); } catch { input = undefined; }
   const parsed = Candidates.safeParse(input);
   const groups = new Map<string, ComparisonCheck[]>();
   for (const candidate of parsed.success ? parsed.data.comparisons : []) {
     const fact = candidate.historical && extractFact(candidate.historical.quote);
-    const label = candidate.product ? normalized(candidate.product) : fact?.product;
+    const rawLabel = candidate.product ? normalized(candidate.product) : fact?.product;
+    const label = rawLabel ? canonicalProductName(rawLabel) : undefined;
     const check = compareEvidence(candidate, memory, sources);
     check.kind = candidate.kind;
     if (label) check.label = label;
@@ -278,26 +302,92 @@ export function verifyChangeAnswer(text: string, memory: RetrievedMemory, source
     const key = JSON.stringify([candidate.kind, label ?? 'unknown', fact ? dimensions(fact) : null]);
     const group = groups.get(key) ?? []; group.push(check); groups.set(key, group);
   }
-  const checks = [...groups.values()].map((group) => group.every((c) => c.verdict === group[0].verdict && c.reason === group[0].reason) ? group[0] :
+  const rawChecks = [...groups.values()].map((group) => group.every((c) => c.verdict === group[0].verdict && c.reason === group[0].reason) ? group[0] :
     { ...cannot('Conflicting candidates for the same comparison; no candidate was preferred.'), label: group[0].label, kind: group[0].kind });
-  if (!parsed.success && !requested.length) checks.push(cannot('Comparison candidates were missing or malformed.'));
-  for (const product of requested) if (!checks.some((c) => c.label === product)) checks.push({
-    ...cannot('No supported evidence pair was supplied for this requested product; it has not been established as unchanged.'), label: product });
+
   const kinds: Array<'price' | 'feature'> = [];
   if (/\b(?:price|prices|pricing|cost|costs)\b/i.test(query)) kinds.push('price');
   if (/\b(?:feature|features|released|release|launched|launch)\b/i.test(query)) kinds.push('feature');
-  for (const product of requested) for (const kind of kinds) {
-    if (!checks.some((c) => c.label === product && (c.kind === kind || !c.kind))) checks.push({
-      ...cannot(`No supported ${kind} evidence pair was supplied for this requested product.`), label: product, kind });
+
+  // Product-level aggregation: if requested products exist, they define the exact expected entities.
+  const products: string[] = requested.length > 0 ? requested : [...new Set(rawChecks.map((c) => c.label).filter(Boolean) as string[])];
+
+  if (!parsed.success && !products.length) {
+    return '1. Cannot verify: Comparison candidates were missing or malformed.\n\nSupported comparisons: 0 of 1. Requested product coverage could not be enumerated; counts apply only to distinct supplied comparisons. Quote matches and constrained comparison rules do not establish full factual verification or complete market coverage.';
   }
+
+  interface ProductOutcome {
+    product: string;
+    verdict: Verdict;
+    reason: string;
+    excerpts: string;
+    allSupported: boolean;
+    allNotComparable: boolean;
+  }
+
   const supported = (c: ComparisonCheck) => c.verdict === 'Confirmed change' || c.verdict === 'No confirmed change';
-  const supportedProducts = requested.filter((name) => checks.filter((c) => c.label === name).every(supported));
-  const unsupportedProducts = requested.filter((name) => !supportedProducts.includes(name) &&
-    checks.filter((c) => c.label === name).every((c) => c.verdict === 'Not comparable'));
-  return checks.map((c, i) => `${i+1}. ${c.verdict} — ${c.label}: ${c.reason}` +
-    (c.currentQuote ? `\nCurrent excerpt: “${c.currentQuote}” [${c.sourceId}]\nHistorical excerpt: “${c.historicalQuote}” (original ${c.historicalIdentity})` : '')).join('\n\n') +
-    `\n\nSupported comparisons: ${checks.filter(supported).length} of ${checks.length}. ` +
-    (requested.length ? `Requested products supported: ${supportedProducts.length} of ${requested.length}; unsupported (not comparable): ${unsupportedProducts.length}; unverified: ${requested.length - supportedProducts.length - unsupportedProducts.length}. Coverage applies only to the supplied comparison kinds, not every price or feature. ` :
+
+  const outcomes: ProductOutcome[] = products.map((product) => {
+    const pChecks = rawChecks.filter((c) => c.label === product);
+
+    const missingKinds: string[] = [];
+    if (kinds.length > 0) {
+      for (const kind of kinds) {
+        if (!pChecks.some((c) => c.kind === kind)) {
+          missingKinds.push(kind);
+        }
+      }
+    }
+
+    if (pChecks.length === 0) {
+      return {
+        product,
+        verdict: 'Cannot verify',
+        reason: 'No supported evidence pair was supplied for this requested product; it has not been established as unchanged.',
+        excerpts: '',
+        allSupported: false,
+        allNotComparable: false,
+      };
+    }
+
+    let verdict: Verdict = 'Cannot verify';
+    if (pChecks.some((c) => c.verdict === 'Confirmed change')) {
+      verdict = 'Confirmed change';
+    } else if (pChecks.every((c) => c.verdict === 'No confirmed change') && missingKinds.length === 0) {
+      verdict = 'No confirmed change';
+    } else if (pChecks.every((c) => c.verdict === 'Not comparable') && missingKinds.length === 0) {
+      verdict = 'Not comparable';
+    } else {
+      verdict = 'Cannot verify';
+    }
+
+    const distinctReasons = [...new Set(pChecks.map((c) => c.reason))];
+    let reason = distinctReasons.length === 1 ? distinctReasons[0] :
+      pChecks.map((c) => c.kind ? `[${c.kind}] ${c.reason}` : c.reason).join('; ');
+
+    if (missingKinds.length > 0) {
+      const missingReason = missingKinds.map((k) => `No supported ${k} evidence pair was supplied for this requested product.`).join(' ');
+      reason = reason ? `${reason}. ${missingReason}` : missingReason;
+    }
+
+    const excerptsList = pChecks
+      .filter((c) => c.currentQuote)
+      .map((c) => `\nCurrent excerpt: “${c.currentQuote}” [${c.sourceId}]\nHistorical excerpt: “${c.historicalQuote}” (original ${c.historicalIdentity})`);
+    const excerpts = excerptsList.join('');
+
+    const allSupported = pChecks.every(supported) && missingKinds.length === 0;
+    const allNotComparable = pChecks.every((c) => c.verdict === 'Not comparable') && missingKinds.length === 0;
+
+    return { product, verdict, reason, excerpts, allSupported, allNotComparable };
+  });
+
+  const supportedProducts = outcomes.filter((o) => o.allSupported);
+  const unsupportedProducts = outcomes.filter((o) => !o.allSupported && o.allNotComparable);
+  const unverifiedCount = products.length - supportedProducts.length - unsupportedProducts.length;
+
+  return outcomes.map((o, i) => `${i+1}. ${o.verdict} — ${o.product}: ${o.reason}${o.excerpts}`).join('\n\n') +
+    `\n\nSupported comparisons: ${supportedProducts.length} of ${products.length}. ` +
+    (requested.length ? `Requested products supported: ${supportedProducts.length} of ${requested.length}; unsupported (not comparable): ${unsupportedProducts.length}; unverified: ${unverifiedCount}. Coverage applies only to the supplied comparison kinds, not every price or feature. ` :
       'Requested product coverage could not be enumerated; counts apply only to distinct supplied comparisons. ') +
     (incomplete ? 'Research is incomplete: some searches failed or were limited. Supported pairs use independently sufficient available evidence; missing research was not treated as unchanged. ' : '') +
     'Quote matches and constrained comparison rules do not establish full factual verification or complete market coverage.';
