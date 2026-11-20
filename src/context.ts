@@ -197,9 +197,49 @@ function isPersonalAssertion(content: string, query = ''): boolean {
 }
 /** Originals are retained here. Only accepted server assistants are eligible. */
 function records(value: Conversation): HistoricalRecord[] {
+  const seeded: HistoricalRecord[] = [];
+  const seeds = value.seededMessages;
+  for (let i = 0; i < seeds.length; i++) {
+    const m = seeds[i];
+    if (m.role === 'user') {
+      const next = seeds[i + 1];
+      if (next && next.role === 'assistant' && Date.parse(next.timestamp) >= Date.parse(m.timestamp)) {
+        seeded.push({
+          conversationId: value.id,
+          turnId: m.id,
+          ordinal: seeded.length,
+          provenance: 'client_seed',
+          user: m,
+          assistant: { id: next.id, content: next.content, timestamp: next.timestamp },
+          timezone: value.timezone,
+          evidence: [],
+        });
+        i++;
+      } else {
+        seeded.push({
+          conversationId: value.id,
+          turnId: m.id,
+          ordinal: seeded.length,
+          provenance: 'client_seed',
+          user: m,
+          timezone: value.timezone,
+          evidence: [],
+        });
+      }
+    } else {
+      seeded.push({
+        conversationId: value.id,
+        turnId: m.id,
+        ordinal: seeded.length,
+        provenance: 'client_seed',
+        user: m,
+        timezone: value.timezone,
+        evidence: [],
+      });
+    }
+  }
   return [
-    ...value.seededMessages.map((m, ordinal): HistoricalRecord => ({ conversationId: value.id, turnId: m.id, ordinal,
-      provenance: 'client_seed', user: m, timezone: value.timezone, evidence: [] })),
+    ...seeded,
     ...value.turns.map((t): HistoricalRecord => {
       const accepted = t.attempts.find((a) => a.status === 'accepted')?.answer;
       return { conversationId: value.id, turnId: t.id, ordinal: t.ordinal, provenance: 'server_recorded',

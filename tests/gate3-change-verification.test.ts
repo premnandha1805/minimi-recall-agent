@@ -11,7 +11,8 @@ import {
   verifyChangeAnswer,
 } from '../src/verification.js';
 import { SearchSession, type Source } from '../src/search.js';
-import type { RetrievedMemory } from '../src/context.js';
+import { retrieveMemory, type RetrievedMemory } from '../src/context.js';
+import type { Conversation } from '../src/memory.js';
 
 const cid = '11111111-1111-4111-8111-111111111111';
 const tid = '22222222-2222-4222-8222-222222222222';
@@ -277,6 +278,120 @@ describe('Gate 3 — Scenario 2: Mixed Recall + Verification', () => {
     expect(result.answer).toContain('Recorded response: "The Neon Starter plan costs USD 20 per seat per month."');
     expect(result.answer).toContain('Confirmed change — neon: Explicit comparable evidence records a price increase.');
     expect(result.answer).toContain('[S1]');
+  });
+
+  it('pairs seeded historical user question and assistant answer, showing both in output with Cannot verify when baseline lacks official evidence', async () => {
+    const conversationId = '33333333-3333-4333-8333-333333333333';
+    const userMsgId = '44444444-4444-4444-8444-444444444444';
+    const assistantMsgId = '55555555-5555-4555-8555-555555555555';
+
+    const convo: Conversation = {
+      schemaVersion: 'recall.memory.v1',
+      id: conversationId,
+      revision: 0,
+      timezone: 'UTC',
+      createdAtUtc: '2026-11-03T10:00:00.000Z',
+      updatedAtUtc: '2026-11-03T10:01:00.000Z',
+      seededMessages: [
+        {
+          id: userMsgId,
+          role: 'user',
+          content: 'What is the standard pricing plan for Neon?',
+          timestamp: '2026-11-03T10:00:00.000Z',
+          provenance: 'client_seed',
+          mergeKey: `id:${userMsgId}`,
+          receivedAtUtc: '2026-11-03T10:00:00.000Z',
+        },
+        {
+          id: assistantMsgId,
+          role: 'assistant',
+          content: "Neon's Launch plan costs USD 20 per seat per month in the US, standard terms, effective 2026-11-01.",
+          timestamp: '2026-11-03T10:01:00.000Z',
+          provenance: 'client_seed',
+          mergeKey: `id:${assistantMsgId}`,
+          receivedAtUtc: '2026-11-03T10:01:00.000Z',
+        },
+      ],
+      turns: [],
+    };
+
+    const store = {
+      list: async () => ({ total: 1, items: [{ id: conversationId, createdAtUtc: convo.createdAtUtc, updatedAtUtc: convo.updatedAtUtc, turnCount: 0 }] }),
+      load: async (id: string) => (id === conversationId ? structuredClone(convo) : undefined),
+      snapshot: async () => [structuredClone(convo)],
+    };
+
+    const laterQuery = 'What did I ask on 3 November? Is your answer still correct today?';
+    const retrieved = await retrieveMemory(store, {
+      query: laterQuery,
+      activeConversationId: '99999999-9999-4999-8999-999999999999',
+      currentTurnId: '88888888-8888-4888-8888-888888888888',
+      referenceInstant: '2026-11-20T12:00:00.000Z',
+      timezone: 'UTC',
+      signal: new AbortController().signal,
+      startedAt: performance.now(),
+      deadlineMs: 25000,
+      alwaysRetrieve: true,
+    });
+
+    expect(retrieved.records).toHaveLength(1);
+    expect(retrieved.records[0].provenance).toBe('client_seed');
+    expect(retrieved.records[0].user.content).toBe('What is the standard pricing plan for Neon?');
+    expect(retrieved.records[0].assistant?.content).toBe(
+      "Neon's Launch plan costs USD 20 per seat per month in the US, standard terms, effective 2026-11-01.",
+    );
+
+    const freshDoc = searchDoc('Neon', priceStr('Neon', '30', '2026-11-14', '1', 'per-seat'), 'neon.tech', '2026-11-20T10:00:00.000Z');
+
+    let callCount = 0;
+    const result = await runAgent(
+      { message: laterQuery },
+      {
+        memory: retrieved,
+        signal: new AbortController().signal,
+        provider: {
+          contextWindowTokens: 65536,
+          complete: async () => {
+            callCount++;
+            if (callCount === 1) {
+              return {
+                text: '',
+                finishReason: 'tool_calls',
+                toolCalls: [{
+                  id: 'call_1',
+                  name: 'web_search',
+                  arguments: JSON.stringify({ queries: ['Neon pricing standard plan Launch plan'] }),
+                }],
+              };
+            }
+            return {
+              text: JSON.stringify({
+                comparisons: [{
+                  kind: 'price',
+                  product: 'Neon',
+                  historical: { conversationId, turnId: userMsgId, sourceId: 'S1', quote: "Neon's Launch plan costs USD 20 per seat per month in the US, standard terms, effective 2026-11-01." },
+                  current: { sourceId: 'S1', quote: freshDoc.text },
+                }],
+              }),
+              finishReason: 'stop',
+              toolCalls: [],
+            };
+          },
+        },
+        search: async () => [freshDoc],
+      },
+    );
+
+    expect(result.reason).toBe('answer');
+    expect(result.answer).toContain('On November 3, 2026, you asked: "What is the standard pricing plan for Neon?"');
+    expect(result.answer).toContain(
+      'Recorded response: "Neon\'s Launch plan costs USD 20 per seat per month in the US, standard terms, effective 2026-11-01."',
+    );
+    expect(result.answer).toContain(
+      'Past assistant responses reflect historical conversation records, not independently certified current facts.',
+    );
+    expect(result.answer).toContain('Cannot verify');
+    expect(result.answer).not.toContain('Confirmed change');
   });
 });
 
