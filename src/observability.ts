@@ -35,6 +35,12 @@ export interface StageObservation {
   usage?: TokenUsage;
   /** Model adapter's bounded diagnostic only, never provider text or secrets. */
   modelFailure?: ModelFailureDiagnostic;
+  /** Bounded safe diagnostic for tool validation failures: field types and Zod issue codes */
+  toolDiagnostic?: {
+    toolName?: string;
+    fieldTypes?: string[];
+    zodIssues?: Array<{ code: string; path: string }>;
+  };
 }
 export type StageObserver = (event: StageObservation) => void;
 

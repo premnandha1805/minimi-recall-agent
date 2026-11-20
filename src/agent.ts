@@ -6,7 +6,7 @@ import { ChatRequestSchema, citationIds, MAX_MESSAGE_CHARS, type ChatRequest } f
 import { createDeadlineScope, createFirstTokenScope, ExecutionTimeoutError, runWithSignal } from './execution.js';
 import { contextFits, ModelResponseSchema, type ModelMessage, type ModelProvider, type ModelResponse } from './model.js';
 import { AGENT_SYSTEM_PROMPT } from './prompts.js';
-import { abortOutcome, observeStage, sourceCounts, tokenUsage, type StageObserver, type StageOutcome, type ValidationCategory } from './observability.js';
+import { abortOutcome, observeStage, sourceCounts, tokenUsage, type StageObservation, type StageObserver, type StageOutcome, type ValidationCategory } from './observability.js';
 import { SEARCH_LIMITS, SearchArgumentsSchema, SearchSession, WEB_SEARCH_TOOL, type Source, type WebSearch } from './search.js';
 import { evaluateGroundedRecall, groundedRecallAnswer, groundHistoricalProse } from './recall-answer.js';
 import { createResearchPolicy } from './research-policy.js';
@@ -193,11 +193,13 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
   const result: AgentResult = { status: 'failed', reason: 'invalid_request', sources: [], issues: [],
     stats: { modelCalls: 0, searchRounds: 0, searchRequests: 0, reservedOutputTokens: 0 }, usage: [] };
   let validationCategory: ValidationCategory | undefined;
+  let toolDiagnostic: StageObservation['toolDiagnostic'] | undefined;
   const observeTotal = () => observeStage(options.observe, agentStartedAt, {
     stage: 'agent', outcome: result.reason === 'answer' ? 'success' :
       ['model_timeout', 'deadline'].includes(result.reason) ? 'timeout' : result.reason === 'cancelled' ? 'abort' : 'failure',
     agentStatus: result.status, modelCalls: result.stats.modelCalls, searchCalls: result.stats.searchRequests,
     stopReason: result.reason, ...(validationCategory ? { validationCategory } : {}),
+    ...(toolDiagnostic ? { toolDiagnostic } : {}),
     ...sourceCounts(result.sources),
   });
   const limits = RunOptionsSchema.safeParse({ deadlineMs: options.deadlineMs,
@@ -241,6 +243,15 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       answer = groundedRecallAnswer('{}', options.memory, parsed.data.message) +
         '\n\nThe model was unavailable; this answer quotes the saved evidence directly.';
     }
+    if (dualRecallVerify && options.memory?.records.length &&
+        ['invalid_tool_call', 'unsupported_tool', 'repeated_tool_call', 'model_timeout', 'provider_error', 'empty_output', 'invalid_response', 'output_limit', 'context_limit', 'round_limit', 'invalid_citation'].includes(reason) &&
+        !options.signal.aborted) {
+      reason = 'answer';
+      issues.add('search_unavailable');
+      result.generationOrigin = 'recovered';
+      const verificationNotice = 'Cannot verify: Current verification could not be completed; web search verification was unavailable or returned an invalid request.';
+      answer = formatRecallAndVerifyAnswer(options.memory, verificationNotice, parsed.data.message);
+    }
     if (reason === 'answer' && !result.generationOrigin && result.stats.modelCalls > 0) {
       result.generationOrigin = 'model';
     }
@@ -252,9 +263,17 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
     if (answer !== undefined) result.answer = boundAnswer(answer);
     return result;
   };
-  const reject = (reason: AgentStopReason, category: ValidationCategory): AgentResult => {
+  const conclude = async (reason: AgentStopReason, answer?: string): Promise<AgentResult> => {
+    const res = finish(reason, answer);
+    if (res.reason === 'answer' && suppressRawStream && options.onText && res.answer) {
+      await options.onText(res.answer);
+    }
+    return res;
+  };
+  const reject = async (reason: AgentStopReason, category: ValidationCategory, diagnostic?: StageObservation['toolDiagnostic']): Promise<AgentResult> => {
     validationCategory = category;
-    return finish(reason);
+    if (diagnostic) toolDiagnostic = diagnostic;
+    return conclude(reason);
   };
   try {
     deadline.signal.throwIfAborted();
@@ -310,7 +329,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
         });
         deadline.signal.throwIfAborted();
         const validated = ModelResponseSchema.safeParse(raw);
-        if (!validated.success) return reject('invalid_response', 'response_schema');
+        if (!validated.success) return await reject('invalid_response', 'response_schema');
         response = validated.data;
         // Success here means a valid provider response, not factual/citation verification.
         modelOutcome = 'success';
@@ -346,7 +365,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
           return finish('answer', groundedRecallAnswer('{}', options.memory, parsed.data.message) +
             '\n\nThe model was unavailable; this answer quotes the saved evidence directly.');
         }
-        return finish(modelScope.signal.reason instanceof ExecutionTimeoutError ? 'model_timeout' : 'provider_error');
+        return await conclude(modelScope.signal.reason instanceof ExecutionTimeoutError ? 'model_timeout' : 'provider_error');
       } finally {
         modelScope.dispose();
         if (modelStartedAt !== undefined) {
@@ -364,15 +383,15 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       }
       if (response.usage) {
         result.usage.push(response.usage);
-        if (response.usage.outputTokens > maxOutputTokens) return reject('output_limit', 'output_limit');
+        if (response.usage.outputTokens > maxOutputTokens) return await reject('output_limit', 'output_limit');
       }
-      if (response.finishReason === 'content_filter') return reject('content_filter', 'content_filter');
-      if (response.finishReason === 'length') return reject('output_limit', 'output_limit');
+      if (response.finishReason === 'content_filter') return await reject('content_filter', 'content_filter');
+      if (response.finishReason === 'length') return await reject('output_limit', 'output_limit');
       if (!response.toolCalls.length) {
-        if (response.finishReason !== 'stop') return reject('invalid_response', 'finish_tool_mismatch');
-        if (!response.text.trim()) return reject('empty_output', 'empty_text');
+        if (response.finishReason !== 'stop') return await reject('invalid_response', 'finish_tool_mismatch');
+        if (!response.text.trim()) return await reject('empty_output', 'empty_text');
         const knownIds = new Set(search.sources.map((source) => source.id));
-        if (citationIds(response.text).some((id) => !knownIds.has(id))) return finish('invalid_citation');
+        if (citationIds(response.text).some((id) => !knownIds.has(id))) return await conclude('invalid_citation');
         let answer = response.text;
         // Historical citation markers are projected in model context; verify that
         // exact representation rather than the untouched on-disk snapshots.
@@ -394,26 +413,51 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
           const memory = options.memory;
           answer = groundHistoricalProse(answer, memory, (sentence) => groundMixedMemoryAnswer(sentence, memory));
         }
-        if (performance.now() - startedAt >= limits.data.deadlineMs) return finish('deadline');
+        if (performance.now() - startedAt >= limits.data.deadlineMs) return conclude('deadline');
         deadline.signal.throwIfAborted();
-        if (citationIds(answer).some((id) => !knownIds.has(id))) return finish('invalid_citation');
+        if (citationIds(answer).some((id) => !knownIds.has(id))) return await conclude('invalid_citation');
         const finalText = boundAnswer(contextLimitation ? `${answer}\n\nContext limitation: ${contextLimitation}` : answer);
         if (suppressRawStream && options.onText && finalText) {
           await options.onText(finalText);
         }
         return finish('answer', finalText);
       }
-      if (!tools.length) return finish('round_limit');
-      if (response.finishReason !== 'tool_calls') return reject('invalid_response', 'finish_tool_mismatch');
+      if (!tools.length) return await conclude('round_limit');
+      if (response.finishReason !== 'tool_calls') return await reject('invalid_response', 'finish_tool_mismatch');
       const groups: string[][] = [];
       for (const call of response.toolCalls) {
-        if (call.name !== 'web_search') return reject('unsupported_tool', 'unsupported_tool');
-        if (seenCallIds.has(call.id)) return reject('repeated_tool_call', 'repeated_tool_id');
+        if (call.name !== 'web_search') {
+          return await reject('unsupported_tool', 'unsupported_tool', { toolName: 'unsupported' });
+        }
+        if (seenCallIds.has(call.id)) {
+          return await reject('repeated_tool_call', 'repeated_tool_id', { toolName: 'web_search' });
+        }
         seenCallIds.add(call.id);
         let args: unknown;
-        try { args = JSON.parse(call.arguments); } catch { return reject('invalid_tool_call', 'tool_arguments_json'); }
+        try {
+          args = JSON.parse(call.arguments);
+        } catch {
+          return await reject('invalid_tool_call', 'tool_arguments_json', {
+            toolName: 'web_search',
+            fieldTypes: ['malformed_json'],
+            zodIssues: [{ code: 'invalid_json', path: 'arguments' }],
+          });
+        }
         const valid = SearchArgumentsSchema.safeParse(args);
-        if (!valid.success) return reject('invalid_tool_call', 'tool_arguments_schema');
+        if (!valid.success) {
+          const fieldTypes = typeof args === 'object' && args !== null
+            ? Object.values(args as Record<string, unknown>).map((v) => Array.isArray(v) ? 'array' : typeof v)
+            : [typeof args];
+          const zodIssues = valid.error.issues.map((i) => ({
+            code: i.code,
+            path: i.path.map((p) => typeof p === 'string' && ['queries', 'query'].includes(p) ? p : typeof p === 'number' ? String(p) : 'unknown').join('.'),
+          }));
+          return await reject('invalid_tool_call', 'tool_arguments_schema', {
+            toolName: 'web_search',
+            fieldTypes,
+            zodIssues,
+          });
+        }
         groups.push(researchPolicy.focus(valid.data.queries));
       }
       messages.push({ role: 'assistant', content: response.text, toolCalls: response.toolCalls });
@@ -442,7 +486,7 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       }
       if (!contextFits({ messages: [...messages, ...toolMessages], tools: [WEB_SEARCH_TOOL], maxOutputTokens: AGENT_LIMITS.maxOutputTokens }, options.provider.contextWindowTokens)) {
         search.sources.splice(0, search.sources.length, ...search.sources.filter((s) => shownSources.has(s.id)));
-        return finish('answer', 'Cannot verify: essential history and research evidence cannot fit the context budget. Please narrow the question.');
+        return await conclude('answer', 'Cannot verify: essential history and research evidence cannot fit the context budget. Please narrow the question.');
       }
       for (const source of fresh) { shownSources.add(source.id); if (!shownBodies.has(source.text)) shownBodies.set(source.text, source.id); }
       for (let i = 0; i < outcomes.length; i++) {
@@ -454,9 +498,9 @@ export async function runAgent(input: ChatRequest, options: AgentOptions): Promi
       if (!options.search || performance.now() - startedAt >= SEARCH_LIMITS.cutoffMs || search.attempts >= SEARCH_LIMITS.total ||
           outcomes.flat().every((outcome) => outcome.status === 'duplicate')) toolsEnabled = false;
     }
-    return finish('round_limit');
+    return await conclude('round_limit');
   } catch {
-    return finish(options.signal.aborted ?
+    return await conclude(options.signal.aborted ?
       (options.signal.reason instanceof ExecutionTimeoutError ? 'deadline' : 'cancelled') :
       deadline.signal.aborted ? 'deadline' : 'provider_error');
   } finally {
