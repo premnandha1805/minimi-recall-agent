@@ -268,7 +268,7 @@ function requestedProducts(memory: RetrievedMemory, query: string): string[] {
   return [...names];
 }
 
-export function formatRecallAndVerifyAnswer(memory: RetrievedMemory, verificationText: string, query: string): string {
+export function formatRecallAndVerifyAnswer(memory: RetrievedMemory, verificationText: string, _query: string): string {
   const record = memory.records[0];
   if (!record) return verificationText;
   const userQ = record.user.content.trim();
@@ -277,7 +277,7 @@ export function formatRecallAndVerifyAnswer(memory: RetrievedMemory, verificatio
   if (record.user.timestamp) {
     try {
       const d = new Date(record.user.timestamp);
-      datePrefix = `On ${d.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}`;
+      datePrefix = `On ${d.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric', timeZone: record.timezone ?? memory.reference.timezone })}`;
     } catch { /* use fallback */ }
   }
   return `${datePrefix}, you asked: "${userQ}"\n\n` +

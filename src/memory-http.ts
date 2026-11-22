@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { ConversationStore, MemoryError, type Conversation } from './memory.js';
 import type { ChatHistoryMessage } from './contracts.js';
 
-/** Normalize supplied history only; automatic retrieval belongs to the next milestone. */
+/** Resolve supplied history against accepted server records; server copies win. */
 export function authoritativeHistory(value: Conversation, history: ChatHistoryMessage[], ordinal: number): ChatHistoryMessage[] {
   const hash = (m: ChatHistoryMessage) => createHash('sha256').update(JSON.stringify([
     m.role, new Date(m.timestamp).toISOString(), m.content])).digest('hex');

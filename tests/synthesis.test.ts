@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { retrieveMemory, recallIntent } from '../src/context.js';
+import { describe, expect, it } from 'vitest';
+import { retrieveMemory } from '../src/context.js';
 import { evaluateGroundedRecall, groundedRecallAnswer, groundHistoricalProse } from '../src/recall-answer.js';
 import { runAgent } from '../src/agent.js';
 import { history, fixtureId, referenceInstant } from './fixtures/universal-memory.js';
@@ -31,6 +31,18 @@ const frozen = (conversations: ReturnType<typeof history>[]) => ({
 });
 
 describe('Recall Agent Synthesis & Grounding Regressions (Tasks 1-8)', () => {
+  it('accepts grounded JSON alone but never leaks a prose preamble around valid evidence', async () => {
+    const conversation = history(10, ['I selected PostgreSQL as the database for CedarLedger.']);
+    const query = 'Which database did I select for CedarLedger?';
+    const memory = await retrieveMemory(frozen([conversation]), opts(query));
+    const json = JSON.stringify({ answer: 'You selected PostgreSQL as the database for CedarLedger.',
+      memoryEvidence: [{ messageId: conversation.turns[0].user.id, quote: conversation.turns[0].user.content }] });
+    expect(evaluateGroundedRecall(json, memory, query)).toMatchObject({ origin: 'model' });
+    const prefixed = evaluateGroundedRecall('You selected MongoDB.\n\n' + json, memory, query);
+    expect(prefixed.origin).toBe('recovered');
+    expect(prefixed.answer).not.toContain('MongoDB');
+    expect(prefixed.answer).toContain('PostgreSQL');
+  });
   // 1. Multi-conversation natural synthesis
   it('1. multi-conversation natural synthesis produces concise answer without irrelevant transcript dumps', async () => {
     const convA = history(10, ['I have an Infosys meeting on 23 August.']);

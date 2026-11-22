@@ -18,7 +18,8 @@
     "test:live": "tsx scripts/live-e2e.ts",
     "eval:offline": "node scripts/evaluate-offline.mjs",
     "eval:memory": "node scripts/evaluate-memory.mjs",
-    "smoke:tavily": "tsx scripts/tavily-smoke.ts"
+    "smoke:tavily": "tsx scripts/tavily-smoke.ts",
+    "audit:history": "tsx scripts/audit-history.ts"
   },
   "keywords": [],
   "author": "",
@@ -26,7 +27,6 @@
   "devDependencies": {
     "@types/node": "24.11.1",
     "happy-dom": "21.0.4",
-    "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vitest": "5.1.0"
   },
@@ -35,6 +35,7 @@
     "ai": "7.0.176",
     "chrono-node": "2.10.3",
     "fastify": "5.12.8",
+    "tsx": "4.23.15",
     "zod": "4.6.7"
   }
 }

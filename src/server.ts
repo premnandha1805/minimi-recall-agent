@@ -263,7 +263,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const memory = installMemoryHttp(app, memoryDirectory, config.NODE_ENV !== 'production' || config.DEBUG_MEMORY === '1',
     !options.memoryDirectory && memoryDirectory === defaultDirectory);
   app.addHook('onReady', async () => { app.log.info({ event: 'memory_startup', reqId: 'startup', pid: process.pid,
-    cwd: process.cwd(), absolutePath: memoryDirectory }, 'Memory storage ready'); });
+    cwd: process.cwd(), absolutePath: memoryDirectory }, 'Memory storage configured'); });
   app.post('/api/chat', async (request, reply) => memory.track((async () => {
     const contentType = request.headers['content-type'];
     if (contentType && !contentType.toLowerCase().includes('application/json')) {
@@ -286,6 +286,8 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         })
       );
     }
+
+    parsed.data.timezone ??= config.DEFAULT_TIMEZONE;
 
     request.log.info(
       {
@@ -383,8 +385,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         requestStage(request, conversation.id, 'retrieval', retrievalStarted, { conversationsScanned: historical.conversationsScanned,
           durationMs: Math.round(retrievalDurationMs * 100) / 100,
           messagesScanned: historical.messagesScanned, status: historical.status,
-          hits: historical.records.slice(0, 8).map((r) => ({ score: r.score, conversationId: r.conversationId,
-            preview: config.DEBUG_MEMORY === '1' ? r.user.content.slice(0, 80) : '[enable DEBUG_MEMORY=1 for local excerpts]' })) });
+          hits: historical.records.slice(0, 8).map((r) => ({ score: r.score, conversationId: r.conversationId })) });
         const history = authoritativeHistory((await store.load(conversation.id))!, parsed.data.history ?? [], turn.ordinal);
         request.executionSignal.throwIfAborted();
         const result = await runAgent({ ...agentInput, history, message: turn.user.content }, {

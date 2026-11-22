@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { SearchArgumentsSchema, WEB_SEARCH_TOOL, type SearchDocument } from '../src/search.js';
 import { runAgent } from '../src/agent.js';
-import type { ModelProvider, ModelResponse } from '../src/model.js';
+import type { ModelProvider } from '../src/model.js';
 import type { RetrievedMemory } from '../src/context.js';
 import type { Source } from '../src/search.js';
 import { createStreamingModelProvider } from '../src/streaming-model.js';

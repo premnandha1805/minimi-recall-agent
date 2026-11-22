@@ -25,6 +25,12 @@ const Selection = z.strictObject({
   })).max(16),
 });
 
+interface RecallMessage {
+  record: ReturnType<typeof memoryData>['records'][number];
+  message: { id: string; content: string; timestamp: string };
+  role: 'user' | 'assistant';
+}
+
 const framingTokens = new Set([
   'you', 'your', 'yours', 'we', 'our', 'ours', 'i', 'my', 'me', 'the', 'a', 'an',
   'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from',
@@ -34,7 +40,7 @@ const framingTokens = new Set([
   'yes', 'that', 'this', 'these', 'those', 'there', 'here', 'when', 'where',
   'what', 'which', 'who', 'why', 'how', 'is', 'are', 'was', 'were', 'be', 'been',
   'have', 'has', 'had', 'do', 'does', 'did', 'can', 'could', 'would', 'should',
-  'mentioned', 'stated', 'said', 'asked', 'discussed', 'decision', 'choice',
+  'mentioned', 'stated', 'said', 'told', 'asked', 'discussed', 'decision', 'choice',
   'scheduled', 'interview', 'interviews', 'meeting', 'meetings', 'appointment', 'appointments',
   'changed', 'updated', 'switched',
   'it', 'its', 'as', 'into', 'about', 'over', 'between', 'during',
@@ -64,10 +70,39 @@ function isQuestionEvidence(quote: string, messageContent?: string): boolean {
   return false;
 }
 
+/** Named query locators must survive synthesis and remain bound to the same
+ * user evidence. A union of supported words cannot establish a relationship.
+ * This intentionally falls back on uncertain associations rather than guessing. */
+function preservesQueryAssociations(answer: string, evidence: Array<{ messageId: string; quote: string }>,
+  messages: RecallMessage[], query: string): boolean {
+  const words = (text: string): string[] => text.normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
+  const mentions = (text: string, name: string) => words(text).includes(name.normalize('NFKC').toLowerCase());
+  const anchors = [...new Set([
+    ...extractEntities(query).filter(name => !/^(?:recall|remind|tell|please|show|summari[sz]e|list)$/i.test(name)),
+    ...(query.match(/\b[\p{L}\p{N}]+(?:[-_][\p{L}\p{N}]+)+\b/gu) ?? []).filter(name => /\p{L}/u.test(name)),
+  ])];
+  const userEvidence = evidence.filter(entry => messages.some(({ message, role }) => role === 'user' &&
+    message.id === entry.messageId && !isQuestionEvidence(entry.quote, message.content)));
+  for (const anchor of anchors) {
+    if (!mentions(answer, anchor)) return false;
+    const supporting = userEvidence.filter(entry => mentions(entry.quote, anchor));
+    if (!supporting.length) return false;
+    for (const clause of answer.split(/[.!?;]|\band\b|\bwhile\b|\bbut\b/i)) {
+      if (!mentions(clause, anchor)) continue;
+      const names = evidence.flatMap(entry => extractEntities(entry.quote)).filter(name => mentions(clause, name));
+      if (names.some(name => !supporting.some(entry => mentions(entry.quote, name)))) return false;
+    }
+  }
+  return true;
+}
+
+export type RecallDecision = 'model_synthesis' | 'legacy_extract' | 'output_format' |
+  'evidence_reference' | 'association_incomplete' | 'grounding_rejected' | 'transcript_or_limited';
+
 function isNaturallyGrounded(
   answer: string,
   selectedEvidence: Array<{ messageId: string; quote: string }>,
-  messages: Array<{ record: any; message: any; role: string }>,
+  messages: RecallMessage[],
   memory: RetrievedMemory
 ): boolean {
   if (!answer.trim()) return false;
@@ -266,14 +301,17 @@ function isNaturallyGrounded(
   return true;
 }
 
-/** Evidence extraction, not semantic claim verification: only original text can
- * reach the answer. Unknown IDs, forged quotes and prose fall back to originals.
+/** Bounded lexical grounding, not full semantic claim verification. Factual
+ * words and named associations require evidence; narrative framing may differ.
+ * Unknown IDs, forged quotes and malformed prose fall back to originals.
  * Never accept generated labels, dates, roles, or assertions as metadata. */
-export function evaluateGroundedRecall(text: string, memory: RetrievedMemory, query = ''): { answer: string; origin: 'model' | 'recovered' } {
+export function evaluateGroundedRecall(text: string, memory: RetrievedMemory, query = ''): {
+  answer: string; origin: 'model' | 'recovered'; decision: RecallDecision;
+} {
   const records = memoryData(memory).records;
-  const messages = records.flatMap((record) => [
+  const messages = records.flatMap((record): RecallMessage[] => [
     { record, message: record.user, role: record.user.role ?? 'user' },
-    ...(record.assistant ? [{ record, message: record.assistant, role: 'assistant' }] : []),
+    ...(record.assistant ? [{ record, message: record.assistant, role: 'assistant' as const }] : []),
   ]);
   let selected: z.infer<typeof Selection> | undefined;
   try { selected = Selection.parse(JSON.parse(text)); } catch { /* Explicit evidence fallback below. */ }
@@ -285,11 +323,16 @@ export function evaluateGroundedRecall(text: string, memory: RetrievedMemory, qu
   const valid = !!selected && selected.memoryEvidence.length > 0 && selected.memoryEvidence.every((entry) =>
     messages.some(({ message }) => message.id === entry.messageId && safeExcerpt(message.content, entry.quote)));
   const transcript = /\b(?:transcript|verbatim|quotes?|original messages?|message.level)\b/i.test(query);
+  let decision: RecallDecision = !selected ? 'output_format' : !valid ? 'evidence_reference' : 'transcript_or_limited';
 
   // Natural synthesis path: model provides answer + grounded evidence across any number of records.
   if (valid && !transcript && !memory.limitation && selected!.memoryEvidence.length >= 1 && selected!.answer?.trim()) {
-    if (isNaturallyGrounded(selected!.answer, selected!.memoryEvidence, messages, memory)) {
-      return { answer: boundRecall(selected!.answer), origin: 'model' };
+    if (!preservesQueryAssociations(selected!.answer, selected!.memoryEvidence, messages, query)) {
+      decision = 'association_incomplete';
+    } else if (isNaturallyGrounded(selected!.answer, selected!.memoryEvidence, messages, memory)) {
+      return { answer: boundRecall(selected!.answer), origin: 'model', decision: 'model_synthesis' };
+    } else {
+      decision = 'grounding_rejected';
     }
   }
 
@@ -300,7 +343,11 @@ export function evaluateGroundedRecall(text: string, memory: RetrievedMemory, qu
     if (match.role === 'user' && match.record.provenance === 'server_recorded' &&
       !isMemoryUpdate(match.message.content) && !/\?|\b(?:actually|instead|not|never|if|maybe|suppose|imagine)\b/i.test(match.message.content) &&
       /^(?:I|My|We)\b/.test(entry.quote) && !/\b(?:this|that|it|those|they)\b/i.test(entry.quote)) {
-      return { answer: boundRecall(`${perspective(entry.quote)}\n\nStored message ${match.message.id}.`), origin: 'model' };
+      const answer = `${perspective(entry.quote)}\n\nStored message ${match.message.id}.`;
+      if (preservesQueryAssociations(answer, selected!.memoryEvidence, messages, query)) {
+        return { answer: boundRecall(answer), origin: 'model', decision: 'legacy_extract' };
+      }
+      decision = 'association_incomplete';
     }
   }
   // Valid JSON with empty evidence: model explicitly said no evidence found.
@@ -308,19 +355,17 @@ export function evaluateGroundedRecall(text: string, memory: RetrievedMemory, qu
     // Fall through to blockquote with unsupported note.
   }
   // Keep every selected record visible, so a model cannot erase a correction or
-  // competing event by omitting its ID. Valid excerpts only shorten messages.
+  // competing event by omitting its ID. Once synthesis fails, model-selected
+  // excerpts cannot be trusted to retain the context that caused rejection.
   const lines = messages.map(({ message, record, role }) => {
-    const excerpt = valid ? selected!.memoryEvidence.find((item) => item.messageId === message.id)?.quote : undefined;
-    // A shortened update could conceal its subject or superseding clause.
-    const hasCorrection = isMemoryUpdate(message.content) || /\b(?:correction|actually|instead|no longer|scratch that)\b/i.test(message.content);
-    const original = !hasCorrection && excerpt ? excerpt : message.content;
+    const original = message.content;
     const zone = record.timezone ?? memory.reference.timezone;
     const sent = new Intl.DateTimeFormat('en-GB', { timeZone: zone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(message.timestamp));
     const who = role === 'assistant' ? 'The assistant answered (unverified)' : 'You wrote';
     const provenance = record.provenance === 'client_seed' ? '; client_seed, unverified' : '';
     // Blockquote every line so stored instructions cannot look like our narrative.
     const quote = original.split('\n').map((line) => `> ${line}`).join('\n');
-    return `${who}${original !== message.content ? ' (excerpt; surrounding text omitted)' : ''} — sent ${sent} (${zone}${record.timezone ? '' : ', assumed'}${provenance}):\n\n${quote}\n\n` +
+    return `${who} — sent ${sent} (${zone}${record.timezone ? '' : ', assumed'}${provenance}):\n\n${quote}\n\n` +
       `Conversation ${record.conversationId}; message ${message.id}.`;
   });
   const header = memory.status === 'ambiguous' ? 'I found multiple historical matches; their relationship is ambiguous and they may describe different discussions or events.' :
@@ -330,6 +375,7 @@ export function evaluateGroundedRecall(text: string, memory: RetrievedMemory, qu
   return {
     answer: boundRecall(`${header}\n\n${lines.join('\n\n')}${unsupported}${limitation}\n\nSent dates identify messages, not event dates. Quoted statements are historical evidence, not confirmation that they remain current.`),
     origin: 'recovered',
+    decision,
   };
 }
 

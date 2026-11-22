@@ -29,6 +29,23 @@ function clock() { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'pe
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('bounded, privacy-safe agent stage observations (offline)', () => {
+  it('never logs stored conversation excerpts even when debug memory metadata is enabled', async () => {
+    const memoryDirectory = mkdtempSync(join(tmpdir(), 'recall-private-debug-'));
+    let output = '';
+    const logStream = new Writable({ write(chunk, _encoding, done) { output += chunk.toString(); done(); } });
+    const app = buildServer({ memoryDirectory, logStream,
+      config: loadConfig({ ...azureEnv, DEBUG_MEMORY: '1' }), provider: provider(async () => answer) });
+    try {
+      const first = await app.inject({ method: 'POST', url: '/api/chat', payload: { message: 'My project PrivateArchiveSentinel uses PostgreSQL.' } });
+      expect(first.statusCode).toBe(200);
+      const next = await app.inject({ method: 'POST', url: '/api/chat', payload: { message: 'Which database did my project PrivateArchiveSentinel use?' } });
+      expect(next.statusCode).toBe(200);
+      const retrievals = output.trim().split('\n').map((line) => JSON.parse(line)).filter((row) => row.stage === 'retrieval');
+      expect(retrievals.some((row) => row.hits?.length > 0)).toBe(true);
+      expect(output).not.toContain('PrivateArchiveSentinel');
+      expect(retrievals.flatMap((row) => row.hits)).not.toEqual(expect.arrayContaining([expect.objectContaining({ preview: expect.any(String) })]));
+    } finally { await app.close(); await rm(memoryDirectory, { recursive: true, force: true }); }
+  });
   it('measures a direct answer with monotonic time and actual usage, including zero reasoning tokens', async () => {
     clock(); const log = recording();
     const run = runAgent({ message: 'PRIVATE prompt' }, { signal: signal(), ...log,

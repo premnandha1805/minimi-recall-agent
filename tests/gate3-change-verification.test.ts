@@ -4,12 +4,9 @@ import {
   canonicalProductName,
   checkSourceQuotations,
   compareEvidence,
-  extractFact,
   extractShortlistEntities,
   formatRecallAndVerifyAnswer,
-  isChangeRequest,
   isRecallAndVerifyRequest,
-  quoteMatches,
   verifyChangeAnswer,
 } from '../src/verification.js';
 import { SearchSession, type Source } from '../src/search.js';
@@ -178,6 +175,14 @@ describe('Gate 3 — Scenario 1: Shortlist entity recovery & 5-product change ve
 });
 
 describe('Gate 3 — Scenario 2: Mixed Recall + Verification', () => {
+  it('labels historical Q&A with the original local date at a UTC day boundary', () => {
+    const memory = memoryWithShortlist('Original answer');
+    memory.reference.timezone = 'Asia/Kolkata';
+    memory.records[0].user.timestamp = '2026-11-03T23:30:00.000Z';
+    expect(formatRecallAndVerifyAnswer(memory, 'Cannot verify', 'Recall')).toContain('On November 4, 2026');
+    memory.records[0].timezone = 'America/Los_Angeles';
+    expect(formatRecallAndVerifyAnswer(memory, 'Cannot verify', 'Recall')).toContain('On November 3, 2026');
+  });
   it('correctly identifies dual recall + verify intent', () => {
     expect(isRecallAndVerifyRequest('What did I ask on 3 November? Is your answer still correct today?')).toBe(true);
     expect(isRecallAndVerifyRequest('What was your recommendation on 3 November and is it still valid?')).toBe(true);

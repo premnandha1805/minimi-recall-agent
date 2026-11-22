@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { archive, history, fixtureId, recallCases, referenceInstant } from './fixtures/universal-memory.js';
-import { retrieveMemory, prepareAgentContext, recallIntent, type RetrievedMemory } from '../src/context.js';
+import { retrieveMemory, prepareAgentContext, recallIntent } from '../src/context.js';
 import { ConversationStore, type Conversation } from '../src/memory.js';
 import { groundedRecallAnswer } from '../src/recall-answer.js';
 import { createTemporalResolver } from '../src/dates.js';
@@ -46,7 +46,8 @@ afterAll(async () => {
       retrievalP50Ms: times[Math.floor(times.length * .5)], retrievalP95Ms: times[Math.min(times.length-1, Math.floor(times.length*.95))],
       mockedHttpMs: integrationTimes,
     } };
-  await fs.writeFile('docs/memory-evaluation.json', JSON.stringify(report, null, 2) + '\n');
+  await fs.mkdir('.data/evaluations', { recursive: true });
+  await fs.writeFile('.data/evaluations/memory-evaluation.json', JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify(report.summary));
 });
 

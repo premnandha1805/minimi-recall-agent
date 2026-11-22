@@ -1,5 +1,6 @@
-export const RECALL_OUTPUT_INSTRUCTIONS = `For pure recall return JSON only: {"answer":"concise direct answer in 1-3 sentences","memoryEvidence":[{"messageId":"original ID","quote":"exact complete sentence"}]}.
-Lead with a direct natural answer using You/Your perspective. Synthesize multiple records chronologically (e.g. "You initially X but later Y"). If unsupported return {"answer":"","memoryEvidence":[]}. Preserve originals for transcript requests. Runtime validates evidence and renders the answer.`;
+export const RECALL_OUTPUT_INSTRUCTIONS = `Pure recall: ONLY JSON, no prose/fences:
+{"answer":"You/Your direct answer","memoryEvidence":[{"messageId":"copy records[].user.id or assistant.id","quote":"exact complete sentence"}]}.
+Preserve requested names, dates, identifiers and relationships. Reuse factual words; combine corrections chronologically. Personal facts need user evidence. If unsupported: {"answer":"","memoryEvidence":[]}. Transcripts preserve originals. Runtime validates.`;
 
 export const AGENT_SYSTEM_PROMPT = `You are Recall, a conversational, evidence-grounded research assistant.
 Lead with the answer. Use the supplied conversation to identify prior shortlists; do not ask which items if they are already given.

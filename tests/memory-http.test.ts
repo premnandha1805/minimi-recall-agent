@@ -38,6 +38,18 @@ afterEach(async () => {
 });
 
 describe('memory HTTP and persistent chat with mocked providers', () => {
+  it.each([undefined, 'Asia/Kolkata'])('uses the configured default timezone unless the request supplies %s', async (timezone) => {
+    const directory = await fs.mkdtemp(join(tmpdir(), 'recall-default-zone-')); directories.push(directory);
+    const app = buildServer({ memoryDirectory: directory, logger: false,
+      config: loadConfig({ ...azureEnv, DEFAULT_TIMEZONE: 'America/New_York' }),
+      fetchImpl: async () => json(wire('Saved answer')) }); apps.push(app);
+    const id = await create(app);
+    const reply = await app.inject({ method: 'POST', url: '/api/chat', payload: {
+      conversationId: id, message: 'Remember my project uses PostgreSQL.', ...(timezone ? { timezone } : {}) } });
+    expect(reply.statusCode).toBe(200);
+    const value = (await app.inject(`/api/conversations/${id}`)).json();
+    expect(value.turns[0].timezone).toBe(timezone ?? 'America/New_York');
+  });
   it('keeps imported history stable through HTTP restore/resubmit and restart', async () => {
     let { app, directory } = await setup(); const id = await create(app);
     const imported = { id: 'external-seed', role: 'user' as const, content: 'Historic shortlist', timestamp: '2026-11-03T10:00:00.000Z' };
