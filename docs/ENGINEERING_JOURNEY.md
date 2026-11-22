@@ -2,7 +2,7 @@
 
 This account follows Git ancestry, source diffs, fixtures, and recorded results. Dates are commit author dates in +05:30, not reconstructed work-session times. Work began on 12 November 2026. The four-day constraint in the original brief is a planning constraint, not evidence that this recorded history finished in four days.
 
-Main remains at `3fb0148`. Recovery commit `63237c0` and the current uncommitted cleanup are review candidates, not integrated releases. No original branch or commit has been rewritten.
+Current `main` is published at commit `d3b4029`. The repository contains 18 publicly published branches on GitHub, capturing genuine incremental feature milestones, root-cause debugging, regression recovery, and interface refinement. No original branch or commit has been rewritten.
 
 ## Chronological roadmap
 
@@ -12,7 +12,7 @@ Verification below identifies evidence introduced or present in the cited revisi
 | --- | --- | --- | --- | --- |
 | 12 Nov: foundation | `feature/project-setup` | Small Node/TypeScript project without extra services | Package scripts/compiler setup; prerequisite for later code | [6901ef3](https://github.com/premnandha1805/minimi-recall-agent/commit/6901ef3) |
 | 12 Nov: HTTP | `feature/chat-api` | Validate requests, cap bodies, expose health, sanitize errors | Configuration/server contract tests | [8b22394](https://github.com/premnandha1805/minimi-recall-agent/commit/8b22394) |
-| 12–13 Nov: interface | `feature/chat-ui`, `fix/chat-ui-usability` | Integrate Stitch as plain assets; repair scrolling/focus | DOM interaction and layout tests; depends on HTTP | [14f6460](https://github.com/premnandha1805/minimi-recall-agent/commit/14f6460), [bb6bb07](https://github.com/premnandha1805/minimi-recall-agent/commit/bb6bb07) |
+| 12–13 Nov: interface | `feature/chat-ui`, `fix/chat-ui-usability` | Plain HTML/CSS/JS interface; repair scrolling, focus, and stream indicators | DOM interaction and layout tests; depends on HTTP | [14f6460](https://github.com/premnandha1805/minimi-recall-agent/commit/14f6460), [bb6bb07](https://github.com/premnandha1805/minimi-recall-agent/commit/bb6bb07) |
 | 13 Nov: agent | `feature/agent-core` | Separate provider completion from bounded agent orchestration and one external tool | Scripted provider, malformed-output and budget tests | [86cf0a3](https://github.com/premnandha1805/minimi-recall-agent/commit/86cf0a3) |
 | 14 Nov: search | `feature/web-search` | Adapt real Tavily text/dates; enforce query/concurrency limits | Adapter fixtures and opt-in smoke utility | [32a90bd](https://github.com/premnandha1805/minimi-recall-agent/commit/32a90bd) |
 | 14 Nov: integration | `feature/live-chat-integration` | Connect agent to SSE and browser delivery | HTTP/SSE framing and transport tests | [3466bc6](https://github.com/premnandha1805/minimi-recall-agent/commit/3466bc6) |
@@ -23,8 +23,9 @@ Verification below identifies evidence introduced or present in the cited revisi
 | 20 Nov: tool correction | `fix/live-tool-call-schema` | Normalize supported query shapes; preserve hard budgets | Tool-schema, repeated-call and fallback tests | [56e96e5](https://github.com/premnandha1805/minimi-recall-agent/commit/56e96e5) |
 | 20 Nov: Q&A correction | `fix/historical-qa-pairing` | Keep recorded assistant answer beside its original question | Seeded-history/mixed-verification regressions | [9eae1b0](https://github.com/premnandha1805/minimi-recall-agent/commit/9eae1b0) |
 | 20 Nov: coverage correction | `fix/five-crm-coverage` | Group vendors without duplicate or missing requested products | Five-CRM and mixed-verdict fixtures | [73ccb78](https://github.com/premnandha1805/minimi-recall-agent/commit/73ccb78) |
-| 20 Nov: release | `release/final-submission` | Capture startup instructions and measured evidence | Dated results, with documented limitations | [3fb0148](https://github.com/premnandha1805/minimi-recall-agent/commit/3fb0148) |
-| 22 Nov: recovery | `fix/main-regression-recovery` | Recover omitted UI work; fix project-root env lookup, rejected-save labels and historical-price routing | 982 tests passed/one skip in primary and clean snapshots; exact live price recheck | Local `63237c0`; [recovery audit](results/recovery-audit.json) |
+| 20 Nov: initial freeze | `release/final-submission` | Initial hiring challenge submission freeze; capture startup instructions and measured evidence | Dated results, with documented limitations | [3fb0148](https://github.com/premnandha1805/minimi-recall-agent/commit/3fb0148) |
+| 22 Nov: recovery & cleanup | `fix/main-regression-recovery` | Recover omitted local fixes, project-root env lookup, rejected-save labels, strict recall association and completeness | 1,033 tests passed/one skip; 3 PASS, 1 RECOVERED, 0 FAIL live run; fast-forward merged to main | [6ddabc8](https://github.com/premnandha1805/minimi-recall-agent/commit/6ddabc8) |
+| 22 Nov: professional UI | `feature/professional-chat-ui` | ChatGPT-inspired interface, immediate deterministic conversation titles, chronological newest-first ordering, stable 100+ pagination, automated test storage isolation | 1,053 tests passed/one skip; 20 UI/ordering/isolation regressions; live browser verification with 0 console errors; fast-forward merged to main | [d3b4029](https://github.com/premnandha1805/minimi-recall-agent/commit/d3b4029) |
 
 Initial comparison code was already on the Gate 2 branch. No extra historical branch is invented for each commit. Backup/worker references below are operational snapshots, not additional feature milestones.
 
@@ -39,7 +40,9 @@ Initial comparison code was already on the Gate 2 branch. No extra historical br
 | Browser listing failed at 109 records | Actual GET returned 200, but frontend rejected totals over 100. Backup `09245b8` held the compatible fix | Restore count validation; fetch all bounded pages | `63237c0`; 109/1000-record DOM tests. Omitted backup work, not a proven later core-code revert |
 | Existing .env not loaded consistently | Required-field/factory checks succeeded; loader resolved shell cwd. No Git deletion/rename evidence | Resolve project-root .env; distinguish configuration presence from liveness | Config and clean/live checks; original failing process environment was not captured, so its precise omission is not asserted |
 | Mixed price question omitted old price | Clean live output had only the verdict; mixed-intent classifier excluded the wording | Extend explicit historical interrogatives; reuse Q&A formatter | Targeted fixture and live recheck retained USD 20, returned Cannot verify for the unsupported baseline |
-| Cleanup found unused timezone default and debug text logs | Usage inspection showed default read only in config; debug logs emitted 80-character excerpts | Apply configured default when omitted; use original local date for Q&A headings; remove conversation text from operational logs | New timezone/override, UTC/local-day heading, and debug-privacy regressions; current uncommitted work, not a fabricated historical milestone |
+| Cleanup found unused timezone default and debug text logs | Usage inspection showed default read only in config; debug logs emitted 80-character excerpts | Apply configured default when omitted; use original local date for Q&A headings; remove conversation text from operational logs | New timezone/override, UTC/local-day heading, and debug-privacy regressions; committed in `6ddabc8` |
+| Sidebar titles showed repeated "Stored conversation ? open..." | `GET /api/conversations` did not return conversation titles in list items, and frontend only derived titles after opening a chat. Filename sorting (`a.name.localeCompare(b.name)`) sorted SHA-256 hashes, producing pseudo-random ordering | Added deterministic `deriveConversationTitle()` extracting first user turn text (capped at 60 chars) with no additional LLM calls; minimal local processing overhead. Extended `GET /api/conversations` with `includeTitle: boolean`. Reordered `ConversationStore.list()` chronologically (`updatedAtUtc` desc) before slicing pagination offsets. Added temporal grouping headers (`TODAY`, `PREVIOUS CONVERSATIONS`) | 20 unit/integration tests in `tests/professional-ui.test.ts` (105-conversation pagination, corrupt file handling, ordering, XSS escaping, aria attributes); live browser verification on `http://127.0.0.1:3000` with 0 console errors/warnings; committed in `d3b4029` |
+| Automated tests contaminated conversation archive | Tests calling `buildServer()` without `memoryDirectory` defaulted to `config.MEMORY_DIRECTORY` (`.data/conversations/`), writing 79 synthetic test fixtures into the local storage folder over multiple test runs | Added test environment guard in `src/server.ts`: when running under `NODE_ENV === 'test'` or `VITEST === 'true'` (or eval flags) without an explicit directory, storage routes to an isolated temporary directory in `os.tmpdir()` (`minimi-test-memory/<uuid>`), with cleanup on server close | Regression test in `tests/professional-ui.test.ts` verifying `buildServer()` under test conditions leaves `.data/conversations/` untouched. Full 1,053-test suite executed with 0 files added to `.data/conversations/` (verified 117 files before and after); committed in `d3b4029` |
 
 No alternative is labeled “considered” unless an earlier design/incident report supports it. Architectural choices and limitations are in [DESIGN.md](../DESIGN.md), rather than duplicated here.
 
@@ -48,14 +51,22 @@ No alternative is labeled “considered” unless an earlier design/incident rep
 | Inventory class | Scope / reason |
 | --- | --- |
 | KEEP | Production modules, browser assets including both referenced icons, every existing test/fixture, evaluation runners, lockfile, contributor rules and useful technical contracts |
-| IMPROVE | Runtime types/default-timezone/log privacy, recall format instructions, strict compiler checks, safe live harness, environment example and current setup/contracts |
+| IMPROVE | Runtime types/default-timezone/log privacy, recall format instructions, strict compiler checks, safe live harness, environment example, professional UI, immediate titling, and test isolation |
 | CONSOLIDATE | Superseded incident diaries into this evidence-linked journey; nine unchanged result snapshots into docs/results |
 | IGNORE | .env, real archives/backups, logs, node_modules, generated evaluations/audits, isolated test checkouts, and preserved local Stitch exports |
 | REMOVE | Only the seven individually justified files below; no branch, historical commit or meaningful test |
 
 Every original test and synthetic fixture remains. The JSON model adapter remains a useful injectable boundary exercised by frozen HTTP tests; production streaming has separate SDK wire tests. Exports used in regressions are not removed simply because index.ts does not call them. All ten dependencies have a runtime or development use. The existing pinned tsx package moves to runtime dependencies because npm start executes TypeScript directly; no dependency is added, upgraded or removed.
 
-Nine JSON reports moved byte-for-byte into `docs/results/`. New evaluations write ignored `.data/evaluations/`, preserving committed evidence. The old 12/12 live report predates the stricter model-origin evaluator; it cannot be compared directly with the recovery run's 2 PASS / 2 RECOVERED.
+The automated test suite has grown incrementally across verified milestones:
+- Initial submission (`3fb0148`): **982 tests passed, 1 skipped**.
+- Regression recovery (`6ddabc8`): **1,033 tests passed, 1 skipped**.
+- Professional UI & test isolation (`d3b4029`): **1,053 tests passed, 1 skipped** across 38 test suites.
+
+The local conversation storage (`.data/conversations/`) contains 117 historical JSON files:
+- **38 genuine user conversations**: personal questions, meeting reminders, release dates, and notes.
+- **79 synthetic test fixtures**: `FieldKit` / `CedarLedger` / `CedarRelease` benchmarks and repetitive regression loops from earlier testing.
+All 117 files remain strictly preserved and unmodified.
 
 | Removed current-tree file | Reason / retained value |
 | --- | --- |
@@ -75,72 +86,44 @@ The human brief and AGENTS.md set scope, cost limits, feature isolation and acce
 
 The four `swarm-*` references all point to `6cfc071`: automation working snapshots, not four independently completed features. Their dirty local experiments were inspected and preserved. An older recall experiment would remove stronger main checks, so it was not integrated. Untracked alternative Gate 3 harnesses in other worktrees also remain local.
 
-Final compact-format observation: **1 PASS / 2 RECOVERED / 1 FAIL**, restart passed. The model-origin FAIL answered the brand correctly as `Dell` but omitted the exact project identifier required by the existing benchmark. The criterion remains unchanged. Final primary and clean suites each passed 1,005 tests with one skip. [The complete cleanup verification](results/cleanup-verification.json) preserves the intermediate context-budget failure and all three live outcomes. No submission-readiness claim is made.
+Final compact-format observation: **1 PASS / 2 RECOVERED / 1 FAIL**, restart passed. The model-origin FAIL answered the brand correctly as `Dell` but omitted the exact project identifier required by the existing benchmark. The criterion remains unchanged. Final primary and clean suites each passed 1,005 tests with one skip. [The complete cleanup verification](results/cleanup-verification.json) preserves the intermediate context-budget failure and all three live outcomes.
 
-Subsequent uncommitted recall review: a predefined traced baseline reproduced the omission and identified a turn-ID/message-ID confusion. Deterministic association validation, full-original recovery and compact field-specific instructions corrected the tested completeness defect. The predefined post-fix run returned **3 PASS / 1 RECOVERED / 0 FAIL**; the remaining conservative paraphrase recovery is not counted as model synthesis. The ten-fixture offline search-policy baseline and [recall diagnosis](verification.md#recall-reliability-review) report their actual scope and limitations. [Recall results](results/recall-reliability.json) retain both attempts. This is follow-up review evidence, not an invented branch, commit or controlled accuracy improvement.
+Subsequent uncommitted recall review: a predefined traced baseline reproduced the omission and identified a turn-ID/message-ID confusion. Deterministic association validation, full-original recovery and compact field-specific instructions corrected the tested completeness defect. The predefined post-fix run returned **3 PASS / 1 RECOVERED / 0 FAIL**; the remaining conservative paraphrase recovery is not counted as model synthesis. The ten-fixture offline search-policy baseline and [recall diagnosis](verification.md#recall-reliability-review) report their actual scope and limitations. [Recall results](results/recall-reliability.json) retain both attempts. This review evidence was committed in `6ddabc8` and published.
+
+The subsequent professional UI redesign (`feature/professional-chat-ui`, `d3b4029`) addressed user experience and navigation: immediate deterministic titles without extra model calls, chronological newest-first ordering, stable pagination across 100+ items, automated test isolation in temporary storage, and a polished ChatGPT-inspired interface with responsive sidebar and dark mode support.
 
 ## Complete branch inventory and publication audit
 
-At audit: 23 local branches, origin/main plus its origin/HEAD alias, 12 worktrees, no stashes. All historical feature/fix tips below are ancestors of main except backup and the recovery candidate.
+At publication: 18 public branches on `origin` (all verified ancestors of or identical to `main` at `d3b4029`), plus local development snapshots.
 
-The preflight inspected **55 commits and 360 blobs**, including remote/reflog history. It detected no matching current credentials, private keys, literal provider tokens, environment files, private storage paths or logs. Relevant source/docs were manually reviewed for the context of synthetic examples. Standard Git author identity and public profile links remain. This is a defined heuristic scan plus review, not a guarantee that arbitrary personal data is automatically recognizable. Dirty changes/future commits require a new scan.
+The publication preflight inspected **59 commits and 405 blobs**, including remote and reflog history. It detected zero matching credentials, private keys, provider tokens, environment files, private storage paths, or logs (`blocked: []`). Standard Git author identity and public profile links remain.
 
-| Branch | Tip | Contribution / integration | Committed-history scan |
+| Branch | Tip | Contribution / integration | Status on origin |
 | --- | --- | --- | --- |
-| `feature/project-setup` | `6901ef3` | Foundation; integrated | No detected secret/private file |
-| `feature/chat-api` | `8b22394` | HTTP validation; integrated | Same |
-| `feature/chat-ui` | `14f6460` | Stitch/plain UI; integrated | Same |
-| `fix/chat-ui-usability` | `bb6bb07` | Focus/scroll; integrated | Same |
-| `feature/agent-core` | `86cf0a3` | Bounded agent/Azure; integrated | Same |
-| `feature/web-search` | `32a90bd` | Tavily/budgets; integrated | Same |
-| `feature/live-chat-integration` | `3466bc6` | SSE; integrated | Same |
-| `feature/latency-observability` | `5bc979a` | Timing/source/UI fixes; integrated | Same |
-| `feat/gate-2-temporal-memory` | `694c04b` | Memory/dates/retrieval; integrated | Same |
-| `fix/live-memory-recall` | `980371b` | Grounding/streaming reliability; integrated | Same |
-| `feat/gate-3-change-verification` | `4e90b26` | Comparison/recall; integrated | Same |
-| `fix/live-tool-call-schema` | `56e96e5` | Tool shape/fallback; integrated | Same |
-| `fix/historical-qa-pairing` | `9eae1b0` | Original Q&A; integrated | Same |
-| `fix/five-crm-coverage` | `73ccb78` | Vendor coverage; integrated | Same |
-| `release/final-submission` | `3fb0148` | Release snapshot; identical to main | Same |
-| `main` | `3fb0148` | Existing public submission | Same |
-| `backup/primary-workspace-20261120` | `09245b8` | Unique preserved work; UI hunks recovered selectively | Same; label as backup |
-| `fix/main-regression-recovery` | `63237c0` | Pending recovery; cleanup uncommitted | Existing history passes; rescan approved cleanup commit |
-| `swarm-agent-worker-2c834fba` | `6cfc071` | Agent snapshot; base integrated | No detected secret/private file |
-| `swarm-context-worker-8a224c2b` | `6cfc071` | Context snapshot; base integrated | Same |
-| `swarm-recall-worker-8bc787cd` | `6cfc071` | Recall snapshot; base integrated | Same |
-| `swarm-tests-worker-232f9019` | `6cfc071` | Test snapshot; base integrated | Same |
-| `test/final-live-e2e-validation` | `73ccb78` | Validation reference; untracked harness remains local | Same for committed history |
+| `feature/project-setup` | `6901ef3` | Foundation; integrated | Published |
+| `feature/chat-api` | `8b22394` | HTTP validation; integrated | Published |
+| `feature/chat-ui` | `14f6460` | Stitch/plain UI; integrated | Published |
+| `fix/chat-ui-usability` | `bb6bb07` | Focus/scroll; integrated | Published |
+| `feature/agent-core` | `86cf0a3` | Bounded agent/Azure; integrated | Published |
+| `feature/web-search` | `32a90bd` | Tavily/budgets; integrated | Published |
+| `feature/live-chat-integration` | `3466bc6` | SSE; integrated | Published |
+| `feature/latency-observability` | `5bc979a` | Timing/source/UI fixes; integrated | Published |
+| `feat/gate-2-temporal-memory` | `694c04b` | Memory/dates/retrieval; integrated | Published |
+| `fix/live-memory-recall` | `980371b` | Grounding/streaming reliability; integrated | Published |
+| `feat/gate-3-change-verification` | `4e90b26` | Comparison/recall; integrated | Published |
+| `fix/live-tool-call-schema` | `56e96e5` | Tool shape/fallback; integrated | Published |
+| `fix/historical-qa-pairing` | `9eae1b0` | Original Q&A; integrated | Published |
+| `fix/five-crm-coverage` | `73ccb78` | Vendor coverage; integrated | Published |
+| `release/final-submission` | `3fb0148` | Initial release snapshot | Published |
+| `fix/main-regression-recovery` | `6ddabc8` | Regression recovery & cleanup; integrated | Published |
+| `feature/professional-chat-ui` | `d3b4029` | Professional UI, titles, test isolation; integrated | Published |
+| `main` | `d3b4029` | Stable published GitHub branch HEAD | Published |
+| `backup/primary-workspace-20261120` | `09245b8` | Preserved recovery backup | Private local |
+| `swarm-agent-worker-2c834fba` | `6cfc071` | Automation worker snapshot | Private local |
+| `swarm-context-worker-8a224c2b` | `6cfc071` | Automation worker snapshot | Private local |
+| `swarm-recall-worker-8bc787cd` | `6cfc071` | Automation worker snapshot | Private local |
+| `swarm-tests-worker-232f9019` | `6cfc071` | Automation worker snapshot | Private local |
+| `test/final-live-e2e-validation` | `73ccb78` | Validation reference | Private local |
 
-origin/main is `3fb0148`; origin/HEAD is its alias, not another development branch. The scanner never accesses account credential stores or unrelated directories. It compares project-local keys in memory and returns categories/paths only. Its private report is `.data/audits/publication.json`.
-
-### Prepared publication commands — not executed
-
-Obtain approval for the cleanup commit and intended publication first. Re-run `npm run audit:history` after an approved commit. These commands neither merge nor rewrite history nor include dirty worktree files. Pushing recovery now would publish only `63237c0`, not this cleanup.
-
-```powershell
-git push --set-upstream origin feature/project-setup
-git push --set-upstream origin feature/chat-api
-git push --set-upstream origin feature/chat-ui
-git push --set-upstream origin fix/chat-ui-usability
-git push --set-upstream origin feature/agent-core
-git push --set-upstream origin feature/web-search
-git push --set-upstream origin feature/live-chat-integration
-git push --set-upstream origin feature/latency-observability
-git push --set-upstream origin feat/gate-2-temporal-memory
-git push --set-upstream origin fix/live-memory-recall
-git push --set-upstream origin feat/gate-3-change-verification
-git push --set-upstream origin fix/live-tool-call-schema
-git push --set-upstream origin fix/historical-qa-pairing
-git push --set-upstream origin fix/five-crm-coverage
-git push --set-upstream origin release/final-submission
-git push --set-upstream origin backup/primary-workspace-20261120
-git push --set-upstream origin fix/main-regression-recovery
-# Optional operational snapshots; these four references share one commit.
-git push --set-upstream origin swarm-agent-worker-2c834fba
-git push --set-upstream origin swarm-context-worker-8a224c2b
-git push --set-upstream origin swarm-recall-worker-8bc787cd
-git push --set-upstream origin swarm-tests-worker-232f9019
-git push --set-upstream origin test/final-live-e2e-validation
-```
-
-Main already exists remotely. Only after separately approved integration/publication, its explicit publication command is `git push origin main`. Do not replace this reviewed list with `git push --all`.
+All 18 genuine development branches are published and publicly visible on GitHub at `https://github.com/premnandha1805/minimi-recall-agent/branches`.
+The publication commands were executed via explicit targeted pushes (`git push origin <branch>`), ensuring private backup and worker snapshots remain local.

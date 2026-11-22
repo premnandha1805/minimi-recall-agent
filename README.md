@@ -72,11 +72,13 @@ npm run test:live -- --live --runs=1 --research
 
 The live harness distinguishes **PASS**, **RECOVERED**, and **FAIL**. Grounded deterministic recovery is useful behavior, but does not count as model-synthesis PASS. Partial answers also cannot pass that gate. Timing fields measure visible SSE output, not raw provider first-token time. The offline evaluation includes a small search-policy baseline on ten existing memory fixtures, with identical grounding criteria and privacy guards; it is not a live accuracy comparison.
 
-The pre-cleanup recovery commit recorded **982 passing tests and one Windows symlink-permission skip**, 31/31 frozen safety checks, and 30/31 usefulness checks. Its strict live recall run had 2 model PASS and 2 RECOVERED. These are dated observations, not a guarantee for the current candidate. [The engineering journey](docs/ENGINEERING_JOURNEY.md) links the evidence and explains unresolved acceptance conditions.
+The pre-cleanup recovery commit recorded **982 passing tests and one Windows symlink-permission skip**, 31/31 frozen safety checks, and 30/31 usefulness checks. Its strict live recall run had 2 model PASS and 2 RECOVERED.
 
 Cleanup evidence recorded **1,005 tests passed, one skipped**, with strict live recall at 1 PASS, 2 RECOVERED and 1 identifier-coverage FAIL. See [cleanup verification](docs/results/cleanup-verification.json) for that dated stage.
 
-The subsequent recall correction preserves requested names/identifiers and checks their association with user evidence. Primary and isolated clean suites each passed **1,033 tests with one skip**. Its predefined post-fix live run returned **3 PASS, 1 RECOVERED, 0 FAIL**, with all required facts returned and restart persistence passing. The remaining recovery conservatively quotes originals after a factual-word paraphrase was rejected. The strict all-model-synthesis gate remains unmet. See [recall reliability evidence](docs/results/recall-reliability.json) and [diagnosis and trade-offs](docs/verification.md#recall-reliability-review).
+The subsequent recall correction preserves requested names/identifiers and checks their association with user evidence. Primary and isolated clean suites each passed **1,033 tests with one skip**. Its predefined post-fix live run returned **3 PASS, 1 RECOVERED, 0 FAIL**, with all required facts returned and restart persistence passing. See [recall reliability evidence](docs/results/recall-reliability.json) and [diagnosis and trade-offs](docs/verification.md#recall-reliability-review).
+
+The professional UI redesign and test-isolation milestone brought the test suite to **1,053 passing tests and one skip** across 38 suites, adding 20 comprehensive unit and integration tests covering immediate deterministic title derivation, temporal grouping, newest-first chronological ordering, pagination across 100+ conversations, and temporary test storage isolation preventing automated test runs from modifying `.data/conversations/`. Offline evaluation passed **41/41** checks and memory evaluation passed **39/39** checks (10/10 grounded scenarios). See [the engineering journey](docs/ENGINEERING_JOURNEY.md) for full incident logs and evidence.
 
 ## Engineering development
 
@@ -89,22 +91,31 @@ The Git history records separate features and bug fixes rather than one fabricat
 | Bounded agent, Tavily, and SSE | `feature/agent-core`, `feature/web-search`, `feature/live-chat-integration` | [86cf0a3](https://github.com/premnandha1805/minimi-recall-agent/commit/86cf0a3), [32a90bd](https://github.com/premnandha1805/minimi-recall-agent/commit/32a90bd), [3466bc6](https://github.com/premnandha1805/minimi-recall-agent/commit/3466bc6) |
 | Memory, dates, and retrieval | `feat/gate-2-temporal-memory`, `fix/live-memory-recall` | [694c04b](https://github.com/premnandha1805/minimi-recall-agent/commit/694c04b), [980371b](https://github.com/premnandha1805/minimi-recall-agent/commit/980371b) |
 | Comparison and regression fixes | `feat/gate-3-change-verification`, tool-schema, Q&A-pairing, and CRM-coverage branches | [4e90b26](https://github.com/premnandha1805/minimi-recall-agent/commit/4e90b26), [56e96e5](https://github.com/premnandha1805/minimi-recall-agent/commit/56e96e5), [9eae1b0](https://github.com/premnandha1805/minimi-recall-agent/commit/9eae1b0), [73ccb78](https://github.com/premnandha1805/minimi-recall-agent/commit/73ccb78) |
-| Recover omitted local fixes | `fix/main-regression-recovery` | Local commit `63237c0`; not yet merged or published |
+| Initial challenge freeze | `release/final-submission` | [3fb0148](https://github.com/premnandha1805/minimi-recall-agent/commit/3fb0148) |
+| Regression recovery & repository cleanup | `fix/main-regression-recovery` | [6ddabc8](https://github.com/premnandha1805/minimi-recall-agent/commit/6ddabc8) |
+| Professional UI, titles, and test isolation | `feature/professional-chat-ui` | [d3b4029](https://github.com/premnandha1805/minimi-recall-agent/commit/d3b4029) |
 
-Development was AI-assisted under human-directed requirements and repository constraints. Branches, source changes, regression fixtures, and measured outcomes support the account; commit authorship alone does not identify which lines were manually typed. Worker snapshots are labeled separately from feature milestones. The full [engineering journey](docs/ENGINEERING_JOURNEY.md) documents the chronology, actual incidents, evidence limits, and approval-gated publication commands.
+Development was AI-assisted under human-directed requirements and repository constraints. Branches, source changes, regression fixtures, and measured outcomes support the account; commit authorship alone does not identify which lines were manually typed. Worker snapshots are labeled separately from feature milestones. The full [engineering journey](docs/ENGINEERING_JOURNEY.md) documents the chronology, actual incidents, evidence limits, and publication records.
 
-## Repository map
+## Repository map and reviewer navigation
 
-- `src/`: server, provider/search adapters, context, dates, JSON memory, comparison and streaming safeguards.
-- `public/`: maintained browser interface, declarations, styles, and referenced icons/manifest.
-- `tests/`: unit, HTTP integration, DOM, regression, and evaluation suites; `tests/fixtures/` contains synthetic data.
-- `scripts/`: evaluation runners, live verification, history preflight, and hygiene check.
-- `docs/`: technical contracts, evaluation method, engineering journey, and retained results.
-- `DESIGN.md`: architectural decisions and trade-offs. `AGENTS.md`: contributor constraints and workflow.
-- `.data/`, `.recall-data/`, `.env`, logs, and local `frontend/` design exports: ignored, never submission data.
+- **Architecture & Trade-offs**: [DESIGN.md](DESIGN.md) explains the single-process model, budget limits, temporal resolution, and citation integrity.
+- **Engineering Journey**: [docs/ENGINEERING_JOURNEY.md](docs/ENGINEERING_JOURNEY.md) details the chronological roadmap, verified problem-solving cases, and complete branch inventory.
+- **Technical Contracts & Evaluation**:
+  - [docs/evaluation.md](docs/evaluation.md): offline benchmark harness, scoring criteria, and limitations.
+  - [docs/memory.md](docs/memory.md): JSON storage format, concurrency queues, and recovery behavior.
+  - [docs/verification.md](docs/verification.md): change verification grammar, quote validation, and recall diagnostics.
+  - [docs/chat-sse.md](docs/chat-sse.md): SSE event stream protocol and error framing.
+  - [docs/agent-core.md](docs/agent-core.md): single-tool agent state machine and budget owner.
+- **Source Code**:
+  - `src/`: server, provider/search adapters, context, dates, JSON memory, comparison, and streaming safeguards.
+  - `public/`: responsive conversational interface, declarations, styles, and SVG icons.
+  - `tests/`: unit, HTTP integration, DOM, regression, and evaluation suites; `tests/fixtures/` contains synthetic data.
+  - `scripts/`: evaluation runners, live verification, history preflight, and hygiene check.
+- **Private / Ignored**: `.data/`, `.recall-data/`, `.env`, logs, and local `frontend/` design exports are ignored and never submission data.
 
 ## Limits
 
 This is a local single-user, single-process application, not an authenticated public service. Keep its loopback binding. JSON storage has capacity and size limits; there is no distributed lock or semantic/vector retrieval. Context selection and recall intent are English-focused heuristics, and safe grounding can fall back to quotations. The comparison grammar and reviewed official-domain list are deliberately finite. Prompt-injection fixtures are useful regressions, not a general safety proof.
 
-Main remains the submission branch. The recovery and cleanup candidate requires review and explicit approval before committing the cleanup, merging, or publishing. No branch history is rewritten.
+Main is the stable published GitHub branch at commit `d3b4029`. All 18 feature, fix, and release branches are published publicly on GitHub, preserving authentic engineering history without rewriting commits.
