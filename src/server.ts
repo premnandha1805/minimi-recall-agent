@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import type { Writable } from 'node:stream';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { ZodError } from 'zod';
@@ -258,8 +259,23 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
-  const memoryDirectory = resolve(options.memoryDirectory ?? config.MEMORY_DIRECTORY);
   const defaultDirectory = resolve(import.meta.dirname, '..', '.data', 'conversations');
+  const isTestEnv = config.NODE_ENV === 'test' ||
+    process.env.NODE_ENV === 'test' ||
+    process.env.VITEST === 'true' ||
+    process.env.RECALL_EVALUATION === '1' ||
+    process.env.RECALL_MEMORY_EVALUATION === '1';
+  const memoryDirectory = resolve(
+    options.memoryDirectory ??
+    (isTestEnv && config.MEMORY_DIRECTORY === defaultDirectory
+      ? join(tmpdir(), 'minimi-test-memory', randomUUID())
+      : config.MEMORY_DIRECTORY)
+  );
+  if (!options.memoryDirectory && isTestEnv && config.MEMORY_DIRECTORY === defaultDirectory) {
+    app.addHook('onClose', async () => {
+      await rm(memoryDirectory, { recursive: true, force: true }).catch(() => {});
+    });
+  }
   const memory = installMemoryHttp(app, memoryDirectory, config.NODE_ENV !== 'production' || config.DEBUG_MEMORY === '1',
     !options.memoryDirectory && memoryDirectory === defaultDirectory);
   app.addHook('onReady', async () => { app.log.info({ event: 'memory_startup', reqId: 'startup', pid: process.pid,

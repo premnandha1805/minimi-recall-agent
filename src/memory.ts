@@ -41,6 +41,7 @@ const Turn = z.strictObject({ id: Id, key: Key, ordinal: z.number().int().nonneg
   timezone: Zone.optional(), attempts: z.array(Attempt).max(MEMORY_LIMITS.attempts) });
 export const ConversationSchema = z.strictObject({ schemaVersion: z.literal('recall.memory.v1'), id: Id,
   clientKey: Key.optional(),
+  title: z.string().max(256).optional(),
   revision: z.number().int().nonnegative(), createdAtUtc: Utc, updatedAtUtc: Utc, timezone: Zone.optional(),
   seededMessages: z.array(Seed).max(MEMORY_LIMITS.seededMessages), turns: z.array(Turn).max(MEMORY_LIMITS.turns),
 }).superRefine((v, ctx) => {
@@ -322,18 +323,35 @@ export class ConversationStore {
       }
     });
   }
-  async list(options: { offset?: number; limit?: number } = {}) {
-    const { offset, limit } = parse(z.strictObject({ offset: z.number().int().min(0).max(this.maxConversations).default(0),
-      limit: z.number().int().min(1).max(MEMORY_LIMITS.pageSize).default(20) }), options);
+  async list(options: { offset?: number; limit?: number; includeTitle?: boolean } = {}) {
+    const { offset, limit, includeTitle } = parse(z.strictObject({ offset: z.number().int().min(0).max(this.maxConversations).default(0),
+      limit: z.number().int().min(1).max(MEMORY_LIMITS.pageSize).default(20),
+      includeTitle: z.boolean().optional() }), options);
     return this.serial('$list', async () => this.commit(async () => {
       const { files } = await this.inventory();
-      const items: Array<{ id: string; createdAtUtc: string; updatedAtUtc: string; turnCount: number }> = [];
-      for (const { name } of files.filter((f) => f.name.endsWith('.json')).sort((a, b) => a.name.localeCompare(b.name))) {
+      const jsonFiles = files.filter((f) => f.name.endsWith('.json'));
+      const total = jsonFiles.length;
+      const allItems: Array<{ id: string; title?: string; createdAtUtc: string; updatedAtUtc: string; turnCount: number }> = [];
+      for (const { name } of jsonFiles) {
         const v = await this.readPath(join(this.directory, name));
         if (!v) throw new MemoryError('CORRUPT');
-        items.push({ id: v.id, createdAtUtc: v.createdAtUtc, updatedAtUtc: v.updatedAtUtc, turnCount: v.turns.length });
+        const item: { id: string; title?: string; createdAtUtc: string; updatedAtUtc: string; turnCount: number } = {
+          id: v.id, createdAtUtc: v.createdAtUtc, updatedAtUtc: v.updatedAtUtc, turnCount: v.turns.length,
+        };
+        if (includeTitle) {
+          item.title = deriveConversationTitle(v);
+        }
+        allItems.push(item);
       }
-      return { items: items.slice(offset, offset + limit), total: items.length };
+      allItems.sort((a, b) => {
+        const timeDiff = new Date(b.updatedAtUtc).getTime() - new Date(a.updatedAtUtc).getTime();
+        if (timeDiff !== 0) return timeDiff;
+        const createdDiff = new Date(b.createdAtUtc).getTime() - new Date(a.createdAtUtc).getTime();
+        if (createdDiff !== 0) return createdDiff;
+        return a.id.localeCompare(b.id);
+      });
+      const items = allItems.slice(offset, offset + limit);
+      return { items, total };
     }));
   }
   async delete(id: string): Promise<boolean> {
@@ -473,4 +491,26 @@ export class ConversationStore {
       process.emitWarning(`Recovered damaged memory document; original retained in private backup directory. Restored backup: ${!!backup}`, { code: 'MEMORY_RECOVERED' });
     }
   }
+}
+
+export function deriveConversationTitle(conversation: Conversation): string {
+  if (conversation.title && conversation.title.trim()) {
+    return conversation.title.trim();
+  }
+  const firstUserTurn = conversation.turns.find((t) => t.user?.content && t.user.content.trim().length > 0);
+  if (firstUserTurn) {
+    const text = firstUserTurn.user.content.replace(/\s+/g, ' ').trim();
+    return text.length > 60 ? `${text.slice(0, 57)}...` : text;
+  }
+  const firstSeedUser = conversation.seededMessages.find((m) => m.role === 'user' && m.content && m.content.trim().length > 0);
+  if (firstSeedUser) {
+    const text = firstSeedUser.content.replace(/\s+/g, ' ').trim();
+    return text.length > 60 ? `${text.slice(0, 57)}...` : text;
+  }
+  const firstSeed = conversation.seededMessages.find((m) => m.content && m.content.trim().length > 0);
+  if (firstSeed) {
+    const text = firstSeed.content.replace(/\s+/g, ' ').trim();
+    return text.length > 60 ? `${text.slice(0, 57)}...` : text;
+  }
+  return 'New conversation';
 }

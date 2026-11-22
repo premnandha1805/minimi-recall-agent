@@ -63,6 +63,8 @@ export { MAX_MESSAGE_CHARS };
  * @typedef {Object} SessionRecord
  * @property {string} id
  * @property {string} title
+ * @property {string} [createdAtUtc]
+ * @property {string} [updatedAtUtc]
  * @property {ThreadEntry[]} entries
  * @property {import('./api.js').ChatHistoryItem[]} history
  * @property {number} omittedHistoryCount
@@ -91,9 +93,9 @@ function formatLocalTime(isoTimestamp) {
  * @returns {string}
  */
 function buildSessionTitle(text) {
-  const collapsed = text.replace(/\s+/g, ' ').trim();
+  const collapsed = (text || '').replace(/\s+/g, ' ').trim();
   if (!collapsed) {
-    return 'Untitled session';
+    return 'New conversation';
   }
   return collapsed.length > 42 ? `${collapsed.slice(0, 39)}...` : collapsed;
 }
@@ -279,6 +281,8 @@ export function createChatApp(options = {}) {
     return {
       id: generateId('sess'),
       title: 'New conversation',
+      createdAtUtc: new Date().toISOString(),
+      updatedAtUtc: new Date().toISOString(),
       entries: [],
       history: [],
       omittedHistoryCount: 0,
@@ -616,7 +620,8 @@ export function createChatApp(options = {}) {
     sessionListEl.replaceChildren();
     if (persistence) {
       const refresh = el(doc, 'button', 'session-refresh-btn btn-secondary', 'Refresh conversations');
-      refresh.addEventListener('click', () => { void refreshConversations(); }); sessionListEl.appendChild(refresh);
+      refresh.addEventListener('click', () => { void refreshConversations(); });
+      sessionListEl.appendChild(refresh);
     }
 
     if (sessions.length === 0) {
@@ -631,30 +636,70 @@ export function createChatApp(options = {}) {
       return;
     }
 
+    /** @param {SessionRecord} item */
+    function getCategory(item) {
+      const first = item.entries?.[0];
+      const firstTimestamp = (first && 'timestamp' in first && typeof first.timestamp === 'string') ? first.timestamp : undefined;
+      const iso = item.updatedAtUtc || item.createdAtUtc || firstTimestamp;
+      if (!iso) return 'Today';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return 'Previous conversations';
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const yesterday = today - 86400000;
+      const t = d.getTime();
+      if (t >= today) return 'Today';
+      if (t >= yesterday) return 'Yesterday';
+      return 'Previous conversations';
+    }
+
+    /** @type {Map<string, SessionRecord[]>} */
+    const groups = new Map();
     for (const item of sessions) {
-      const button = el(doc, 'button', 'session-item-btn', item.title);
-      button.type = 'button';
-      if (item.id === activeSession.id) {
-        button.setAttribute('aria-current', 'page');
-      }
-      button.addEventListener('click', () => {
-        if (persistence && remoteSessions.has(item.id)) { void openConversation(item.id); return; }
-        if (item.id === activeSession.id) {
-          closeMobileDrawer({ restoreFocus: false, focusTarget: chatInput });
-          chatInput?.focus({ preventScroll: true });
-          return;
-        }
-        abortActiveRequest('navigation');
-        activeSession = item;
-        showComposerError('');
-        closeMobileDrawer({ restoreFocus: false, focusTarget: chatInput });
-        isUserNearBottom = true;
-        renderWorkspace();
-        scrollToBottom({ force: true });
-        chatInput?.focus({ preventScroll: true });
-        announce(`Switched to session ${item.title}`);
+      const cat = getCategory(item);
+      if (!groups.has(cat)) groups.set(cat, []);
+      groups.get(cat)?.push(item);
+    }
+
+    const order = ['Today', 'Yesterday', 'Previous conversations'];
+    for (const cat of order) {
+      const list = groups.get(cat);
+      if (!list || list.length === 0) continue;
+      list.sort((a, b) => {
+        const timeA = new Date(a.updatedAtUtc || a.createdAtUtc || 0).getTime();
+        const timeB = new Date(b.updatedAtUtc || b.createdAtUtc || 0).getTime();
+        return timeB - timeA;
       });
-      sessionListEl.appendChild(button);
+      const header = el(doc, 'div', 'session-group-heading', cat);
+      sessionListEl.appendChild(header);
+
+      for (const item of list) {
+        const button = el(doc, 'button', 'session-item-btn', item.title);
+        button.type = 'button';
+        button.title = item.title;
+        button.setAttribute('aria-label', item.title);
+        if (item.id === activeSession.id) {
+          button.setAttribute('aria-current', 'page');
+        }
+        button.addEventListener('click', () => {
+          if (persistence && remoteSessions.has(item.id)) { void openConversation(item.id); return; }
+          if (item.id === activeSession.id) {
+            closeMobileDrawer({ restoreFocus: false, focusTarget: chatInput });
+            chatInput?.focus({ preventScroll: true });
+            return;
+          }
+          abortActiveRequest('navigation');
+          activeSession = item;
+          showComposerError('');
+          closeMobileDrawer({ restoreFocus: false, focusTarget: chatInput });
+          isUserNearBottom = true;
+          renderWorkspace();
+          scrollToBottom({ force: true });
+          chatInput?.focus({ preventScroll: true });
+          announce(`Switched to session ${item.title}`);
+        });
+        sessionListEl.appendChild(button);
+      }
     }
   }
 
@@ -1588,7 +1633,11 @@ export function createChatApp(options = {}) {
           subtitle: attempt?.status ?? 'Unsubmitted turn', pill: 'Stored turn', body: 'No accepted answer is stored for this turn. Retry or refresh its server state.',
           retryPrompt: turn.user.content, retryHistory: [], telemetry: {} });
       }
-      session.title = buildSessionTitle(value.turns[0]?.user.content ?? value.seededMessages[0]?.content ?? 'Stored conversation');
+      const raw = /** @type {any} */ (value);
+      const rawTitle = raw.title ?? value.turns[0]?.user.content ?? value.seededMessages[0]?.content ?? 'New conversation';
+      session.title = buildSessionTitle(rawTitle);
+      session.createdAtUtc = raw.createdAtUtc;
+      session.updatedAtUtc = raw.updatedAtUtc;
       const index = sessions.findIndex((s) => s.id === id); if (index >= 0) sessions[index] = session; else sessions.push(session);
       activeSession = session; remoteSessions.add(id); remember(id); memoryStatus.textContent = ''; renderWorkspace();
     } catch (error) {
@@ -1606,8 +1655,27 @@ export function createChatApp(options = {}) {
             !page.items.every((/** @type {any} */ v) => memoryId(v.id))) throw new Error('Invalid list');
         if (page.items.length === 0 && offset < page.total) throw new Error('Incomplete list');
         if (token !== navigation || listenerController.signal.aborted) return;
-        for (const item of page.items) if (!sessions.some((s) => s.id === item.id)) {
-          sessions.push({ id: item.id, title: 'Stored conversation ? open to view', entries: [], history: [], omittedHistoryCount: 0 }); remoteSessions.add(item.id);
+        for (const item of page.items) {
+          const itemTitle = (typeof item.title === 'string' && item.title.trim()) ? item.title.trim() : 'New conversation';
+          const existing = sessions.find((s) => s.id === item.id);
+          if (existing) {
+            if ((!existing.title || existing.title === 'Stored conversation ? open to view' || existing.title === 'New conversation') && itemTitle !== 'New conversation') {
+              existing.title = itemTitle;
+            }
+            if (!existing.createdAtUtc && item.createdAtUtc) existing.createdAtUtc = item.createdAtUtc;
+            if (item.updatedAtUtc) existing.updatedAtUtc = item.updatedAtUtc;
+          } else {
+            sessions.push({
+              id: item.id,
+              title: itemTitle,
+              createdAtUtc: item.createdAtUtc,
+              updatedAtUtc: item.updatedAtUtc,
+              entries: [],
+              history: [],
+              omittedHistoryCount: 0,
+            });
+          }
+          remoteSessions.add(item.id);
         }
         if (offset + page.items.length >= page.total) break;
       }
@@ -1703,6 +1771,9 @@ export function createChatApp(options = {}) {
 
     if (activeSession.entries.length === 0) {
       activeSession.title = buildSessionTitle(trimmed);
+      activeSession.updatedAtUtc = timestamp;
+      persistActiveSessionInList();
+      renderSessionList();
     }
 
     activeSession.entries.push({

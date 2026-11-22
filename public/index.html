@@ -68,10 +68,6 @@
           </button>
 
           <div class="session-section">
-            <div class="session-section-header">
-              <span class="section-label">This Session</span>
-              <span class="session-scope-badge">Local server storage</span>
-            </div>
             <div id="session-list" class="session-list" role="navigation" aria-label="Session conversations">
               <p class="session-empty-note">
                 Submitted conversations and source snapshots are saved locally on this server.
@@ -192,37 +188,16 @@
             </section>
 
             <section id="welcome-view" class="welcome-view" aria-labelledby="welcome-heading">
-              <div class="welcome-pill">
-                <span class="status-dot is-online" aria-hidden="true"></span>
-                <span>Recall Editorial · Chat UI</span>
+              <div class="welcome-header">
+                <h1 id="welcome-heading" class="welcome-heading">
+                  How can I help you?
+                </h1>
+                <p class="welcome-subtitle">
+                  Ask a question or revisit a conversation.
+                </p>
               </div>
-
-              <div class="welcome-eyebrow">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path
-                    d="M12 19L19 12L22 15L15 22L12 19ZM18 13L16.5 5.5L2 2L5.5 16.5L13 18L18 13ZM2 2L9.586 9.586"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-                <span>Synthesis Canvas</span>
-              </div>
-
-              <h1 id="welcome-heading" class="welcome-heading">
-                What would you like to revisit or explore?
-              </h1>
-              <p class="welcome-subtitle">
-                Ask a question, test the chat API contract, or draft a prompt in this session.
-              </p>
 
               <div class="starter-section">
-                <div class="starter-header">
-                  <span class="starter-header-title">Suggested recall paths</span>
-                  <span class="starter-header-hint">Press card to populate prompt</span>
-                </div>
-
                 <button
                   type="button"
                   class="starter-card"
@@ -283,9 +258,7 @@
                       </svg>
                     </span>
                     <span class="starter-text">
-                      <span class="starter-title"
-                        >Has the pricing changed since our last comparison?</span
-                      >
+                      <span class="starter-title">Has the pricing changed since our last comparison?</span>
                       <span class="starter-desc">
                         Compare prior claims against current public records &amp; note differences
                       </span>
@@ -327,12 +300,9 @@
                       </svg>
                     </span>
                     <span class="starter-text">
-                      <span class="starter-title"
-                        >Find the latest information and show the sources.</span
-                      >
+                      <span class="starter-title">Find the latest information and show the sources.</span>
                       <span class="starter-desc">
-                        Concise synthesis with explicit dates and source links when agent search is
-                        enabled
+                        Concise synthesis with explicit dates and source links when agent search is enabled
                       </span>
                     </span>
                   </span>
@@ -353,32 +323,6 @@
                     />
                   </svg>
                 </button>
-              </div>
-
-              <div class="preview-banner" role="note">
-                <div class="preview-banner-icon" aria-hidden="true">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.75" />
-                    <path
-                      d="M12 16V11M12 8H12.01"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                    />
-                  </svg>
-                </div>
-                <div class="preview-banner-body">
-                  <div class="preview-banner-title-row">
-                    <span class="preview-banner-title">Conversational Web Search</span>
-                    <span class="preview-badge">Local server storage</span>
-                  </div>
-                  <p class="preview-banner-copy">
-                    Ask a question to receive an answer with source links when web research is used.
-                    Research progress appears while you wait; the answer arrives when complete.
-                    Submitted conversations and source snapshots are saved locally on this server.
-                    Source checks do not establish full factual verification.
-                  </p>
-                </div>
               </div>
             </section>
 
@@ -404,7 +348,7 @@
               id="chat-input"
               class="composer-textarea"
               rows="2"
-              placeholder="Ask Recall Agent to synthesize, retrieve or compare..."
+              placeholder="Message Recall Agent..."
             ></textarea>
             <p id="composer-error" class="composer-error" hidden role="alert"></p>
             <div class="composer-footer">

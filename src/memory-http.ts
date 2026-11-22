@@ -81,8 +81,9 @@ export function installMemoryHttp(app: FastifyInstance, directory?: string, debu
   });
   app.get('/api/conversations', async (request) => {
     const query = valid(z.strictObject({ offset: z.coerce.number().int().min(0).max(1000).optional(),
-      limit: z.coerce.number().int().min(1).max(50).optional() }), request.query);
-    return (await getStore()).list(query);
+      limit: z.coerce.number().int().min(1).max(50).optional(),
+      includeTitle: z.coerce.boolean().optional() }), request.query);
+    return (await getStore()).list({ ...query, includeTitle: query.includeTitle ?? true });
   });
   app.get('/api/conversations/:id', async (request) => {
     const { id } = valid(z.strictObject({ id: Id }), request.params);

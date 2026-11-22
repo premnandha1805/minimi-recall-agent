@@ -463,6 +463,17 @@ async function sendChatRequestInner(payload, options = {}) {
 }
 
 /** @typedef {import('../src/contracts.js').ChatEventPayloads} ChatEvents */
+/**
+ * @typedef {Object} StoredConversation
+ * @property {'recall.memory.v1'} schemaVersion
+ * @property {string} id
+ * @property {string} [title]
+ * @property {string} [createdAtUtc]
+ * @property {string} [updatedAtUtc]
+ * @property {number} [revision]
+ * @property {Array<{id: string, role: string, content: string, timestamp: string}>} seededMessages
+ * @property {Array<any>} turns
+ */
 /** @typedef {{signal?: AbortSignal, fetchImpl?: typeof fetch, maxHistoryItems?: number,
  * maxBodyBytes?: number, onProgress?: (progress: ChatEvents['progress']) => void,
  * onDelta?: (text: string) => void, onDraftReset?: () => void}} ChatOptions */
