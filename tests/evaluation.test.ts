@@ -17,7 +17,8 @@ afterAll(async () => { if (process.env.RECALL_EVALUATION === '1') {
   const report = JSON.stringify({
   description: 'Offline scripted-provider outcomes; local wall time includes disk/HTTP injection, excludes setup and virtual timeout waits.', rows,
 }, null, 2);
-  await fs.writeFile('docs/evaluation-results.json', report + '\n');
+  await fs.mkdir('.data/evaluations', { recursive: true });
+  await fs.writeFile('.data/evaluations/evaluation-results.json', report + '\n');
   console.table(rows.map(({actual: _actual, ...r}) => r));
 } });
 
