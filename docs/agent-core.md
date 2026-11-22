@@ -1,94 +1,26 @@
-# Feature 4: internal agent core
+# Agent and provider boundaries
 
-`runAgent(request, { provider, signal, search? })` is an internal TypeScript API.
-`createModelProvider(loadConfig())` selects the configured adapter. `POST /api/chat`
-now uses [recall.chat.v1](chat-sse.md) to invoke this unchanged core. The HTTP layer
-requires both supported Azure and Tavily configuration before starting work.
-Missing configuration returns sanitized HTTP 503 without model calls. Startup,
-imports and tests do not initiate live API calls.
+`runAgent` in `src/agent.ts` orchestrates a provider-swappable `ModelProvider` and one external tool, `web_search`. Memory, date parsing, source identity, budgets and comparison rules are internal functions. History/search content is untrusted data. The production adapter uses the pinned AI SDK; the native JSON adapter remains an injectable boundary for frozen integration tests and compatible callers.
 
-The loop uses at most three model requests: up to two tool-call rounds followed
-by synthesis with tools disabled. One round is one model response, including all
-its `web_search` calls. Each call accepts `{ queries: string[] }`. The single
-request-local budget permits five actual search requests in round one and three
-in round two, eight total, with two concurrent provider requests. Failed calls
-count; normalized duplicate queries do not run again. There are no retries.
-Search admission stops at 15 seconds; each search has a four-second timeout.
-After a search timeout, no replacements start, even if a provider ignores abort.
+## Limits and failure behavior
 
-The overall limit is 25 seconds (or a smaller caller limit). Pass the existing
-`request.executionSignal` to inherit the server's arrival deadline/disconnect;
-pass a monotonic `startedAt` from request arrival when wiring HTTP so the search
-cutoff also includes request parsing time. Model calls have a ten-second timeout.
-Timers and parent abort listeners are disposed. Late promise rejections are
-observed even when a provider ignores cancellation; synchronous CPU work cannot
-be interrupted.
+- At most two search rounds, five actual provider requests in round one and three in round two, eight overall, including failures. Multiple tool invocations share the round budget; normalized duplicates do not create requests.
+- Two provider searches may run concurrently. Search admission stops at 15 seconds; individual searches have bounded timeouts. Late provider completion cannot exceed the caller's permitted wait.
+- The default overall request deadline is 25 seconds, inherited from HTTP arrival. Abort signals propagate on timeout/disconnect. Model first-output timing and one eligible shorter-context retry remain inside the overall/model-call/output budgets; SDK automatic retries are disabled.
+- Ordinary drafts stream as generated. Historical recall and comparisons suppress unvalidated prose/JSON until grounding or deterministic comparison finishes. The final result replaces provisional text.
+- Unknown citations, malformed tool output and incomplete searches are explicit failures or partial answers, not fabricated success. Pure recall may quote saved evidence if model synthesis cannot be accepted; metadata reports `generation.origin: recovered`.
 
-Each model request reserves at most 2,048 output tokens; at most 6,144 can be
-reserved for a run, including failed calls or missing usage reports. Smaller
-caller budgets are allowed. Input context is bounded by 65,536 serialized UTF-8
-bytes and a conservative byte count plus framing allowance and reserved output
-against the configured deployment context window. This is not an exact tokenizer.
-Oversized context fails explicitly; history is never silently dropped. Date and
-keyword anchoring remains part of the later memory feature.
+## Azure v1 implementation
 
-The result includes status/reason, optional model answer, source registry, explicit
-research issues, counters and reported usage. Consumers must display partial
-coverage/issues alongside answers. Empty, malformed, filtered, truncated or
-unknown-citation output is rejected, not converted to a successful answer.
-Malformed/unsupported tool calls and repeated tool-call IDs stop the loop.
-Duplicate queries are reported to the model; an all-duplicate round ends research.
+Only `MODEL_PROVIDER=azure-openai-v1` implements live HTTP chat. It uses the exact configured HTTPS `/openai/v1/chat/completions` URL, deployment name, API-key authentication and context capacity. Redirects are rejected and credentials are not forwarded to another endpoint. There is no API-version or model fallback.
 
-`WebSearch` is an injectable boundary. `createTavilySearch(config)` now provides a
-real basic-search implementation (see [web-search.md](./web-search.md)). Each
-admitted invocation makes one provider request and honors its signal. The adapter
-supplies provider title/URL/snippets, an observed retrieval timestamp, and only
-valid explicit publication dates. At most three documents per query are accepted;
-text is limited to 2,000 characters before both model context and source storage.
-Source IDs are unique per run and assigned in query order. Unavailable search is
-an explicit tool result, not an empty successful search. Tests use labeled fixtures.
-Citation-ID validation is not claim support or quotation verification.
+`streaming-model.ts` uses the pinned SDK's `streamText`, `instructions`, one-step completion, and zero SDK retries. Disabled tools omit tool-choice fields. `model.ts` uses bounded native-fetch JSON parsing for the non-streaming adapter. Neither adapter exposes raw provider errors or secrets. Deployment text/tool support and available quota must be verified with the actual account.
 
-The request-local registry now reuses IDs for equivalent source URLs, preserving
-the first exact evidence text and URL in every repeated tool result. Internal
-query outcomes retain per-query provenance and advisory relevance signals;
-the public registry/SSE shape is unchanged. See the conservative identity and
-relevance policy in [web-search.md](web-search.md#request-local-url-identity-and-relevance).
+## Verification map
 
-## Azure adapter scope
+- `agent.test.ts`, `tool-call-schema.test.ts`: rounds, multiple invocations, malformed calls and stop reasons.
+- `model.test.ts`, `streaming-model.test.ts`: native/SDK wire format, trusted instructions and disabled-tool behavior.
+- `request-recovery.test.ts`, `safeguards.test.ts`: first-output deadlines, cancellation and bounded retry.
+- `production-correctness.test.ts`, `synthesis.test.ts`: origin metadata, safe historical grounding and suppression of unchecked drafts.
 
-The native-fetch adapter is limited to Azure OpenAI **v1 Chat Completions**, using
-the exact configured HTTPS `/openai/v1/chat/completions` URL, deployment name,
-`api-key` authentication, `messages`, function `tools`, `tool_choice`, and
-`max_completion_tokens`. It requests non-streaming text only. It rejects multiple
-choices, invalid JSON, malformed responses, oversized response bodies (128 KiB),
-and redirects. API response bodies, keys, URLs and provider error messages are
-not exposed through core errors. No API-version query is guessed or appended.
-
-Reference verified during implementation:
-[Microsoft Azure OpenAI v1 REST specification](https://learn.microsoft.com/en-us/rest/api/microsoft-foundry/azureopenai/chat).
-Not supported here: legacy dated Azure APIs, Responses API, generic Azure AI
-Inference, Entra authentication, arbitrary model-specific parameters, streaming,
-or other provider adapters. A model must explicitly support the listed features;
-the Azure label alone does not establish compatibility or free/student eligibility.
-
-## Remaining integration
-
-The frozen design's target architecture is unchanged. HTTP/browser integration now
-transports factual progress and a validated final/partial answer, not model tokens.
-True token streaming remains outstanding, along with persistent memory, temporal
-recall/date anchoring and quote/claim verification. Only completed answers enter
-subsequent browser request history; partial research stays visible with limitations.
-No live compatibility, credentials/quota or latency have been verified. Existing
-environment defaults do not imply an implemented Gemini adapter. Selecting an
-unsupported provider fails explicitly in the core factory and HTTP preflight.
-
-Offline verification (PowerShell):
-
-```powershell
-npm.cmd run typecheck
-npm.cmd test -- tests/agent.test.ts tests/model.test.ts
-npm.cmd test
-git diff --check
-git status --short --branch
-```
+See [chat-sse.md](chat-sse.md), [web-search.md](web-search.md), [memory.md](memory.md), and [verification.md](verification.md) for their respective contracts. No claim of general factual correctness follows from these bounded checks.

@@ -1,0 +1,771 @@
+{
+  "date": "2026-11-22",
+  "scope": "Uncommitted recall reliability follow-up; previous cleanup and original history preserved.",
+  "verdict": "FUNCTIONALLY CORRECT — STRICT MODEL-SYNTHESIS GATE UNMET",
+  "verdictScope": "All four predefined post-fix synthetic live cases returned the required facts. This is not a general accuracy claim.",
+  "rootCauses": {
+    "omission": "The full source and selected quote contained the requested project identifier. The old validator checked supported words but not named association completeness, accepting the bare brand.",
+    "meetingRecovery": "The traced baseline selected record.turnId instead of user.id. It was the wrong identity field, not an invented UUID. After fixing that field, harmless told framing also needed to be recognized as narrative.",
+    "remainingRecovery": "Post-fix laptop response included every required fact and valid references, but bought was not in the quoted factual wording purchased. Conservative lexical grounding returned complete original quotes, accurately labeled recovered.",
+    "historicalLimit": "Raw provider responses for the older cleanup recovered requests were not recorded. Their exact per-request causes cannot be assigned retrospectively. Existing separate prose-plus-JSON diagnostic is not evidence for those individual requests."
+  },
+  "correction": [
+    "Require named query locators/compound identifiers in answers and selected user evidence.",
+    "Reject unsupported entity/locator combinations across records, including lowercased answers.",
+    "Recover to full labeled originals rather than model-shortened excerpts.",
+    "Specify copying user.id or assistant.id; preserve requested names, dates and relationships.",
+    "Recognize told as nonfactual framing; factual wording, IDs, quote boundaries and roles remain checked."
+  ],
+  "options": {
+    "selected": "Small deterministic safeguards plus compact instructions and retained recovery.",
+    "rejected": [
+      "Prompt-only completeness",
+      "Turn-ID substitution or benchmark relaxation",
+      "Unrestricted paraphrase/prose acceptance",
+      "Extra LLM judges/retries",
+      "Provider-specific output-contract expansion"
+    ]
+  },
+  "baseline": {
+    "testsPassed": 1005,
+    "testsSkipped": 1,
+    "filesProtectedAtStart": 102,
+    "historicalCleanup": "docs/results/cleanup-verification.json; left unchanged"
+  },
+  "verification": {
+    "typecheck": "PASS primary and clean, server and browser",
+    "lint": "PASS, 0 errors",
+    "diffCheck": "PASS",
+    "primary": {
+      "files": 37,
+      "passed": 1033,
+      "skipped": 1,
+      "failed": 0,
+      "seconds": 30.74
+    },
+    "clean": {
+      "files": 37,
+      "passed": 1033,
+      "skipped": 1,
+      "failed": 0,
+      "seconds": 38.89
+    },
+    "skip": "Existing Windows symlink-permission limitation.",
+    "newAssociationTests": 18,
+    "newPolicyTests": 10,
+    "beforeCorrection": "Seven of the initial twelve new generalized association tests failed; no existing test was weakened.",
+    "initialTypecheck": "Caught a string-array inference error in the new helper; explicitly typed and corrected before live acceptance.",
+    "offline": {
+      "commandTests": 41,
+      "originalCases": 31,
+      "safety": 31,
+      "usefulness": 30,
+      "C8": "Intentional abstention for untrusted synthetic domain; trust guard unchanged."
+    },
+    "memory": {
+      "tests": 39,
+      "summary": {
+        "cases": 10,
+        "expectedConversations": 10,
+        "relevantRetrievedConversations": 10,
+        "unrelatedRetrievedConversations": 0,
+        "groundedCases": 10,
+        "retrievalP50Ms": 4.649499999999989,
+        "retrievalP95Ms": 63.973599999999806,
+        "mockedHttpMs": [
+          364.57429999999977
+        ]
+      }
+    },
+    "searchPolicyBaseline": {
+      "kind": "Offline search-policy ablation on ten existing synthetic memory fixtures; scripted model, not live accuracy or latency.",
+      "criteria": "Same expected conversation IDs and existing universal-memory grounding criterion; privacy and budgets unchanged.",
+      "summary": [
+        {
+          "policy": "agent",
+          "cases": 10,
+          "grounded": 10,
+          "selectedExpectedConversations": 10,
+          "modelCalls": 9,
+          "searchAttempts": 0,
+          "providerRequests": 0,
+          "privacyBlocked": 0
+        },
+        {
+          "policy": "always-attempt-search",
+          "cases": 10,
+          "grounded": 10,
+          "selectedExpectedConversations": 10,
+          "modelCalls": 9,
+          "searchAttempts": 10,
+          "providerRequests": 8,
+          "privacyBlocked": 2
+        }
+      ]
+    },
+    "liveLaunchFailure": "Initial sandboxed baseline launcher failed in tsx Windows user lookup (ENOMEM), before provider calls. Approved outside-sandbox baseline then ran once.",
+    "predefinedLiveRuns": 2,
+    "liveRuns": [
+      {
+        "phase": "before",
+        "timestamp": "2026-11-22T07:15:46.363Z",
+        "strict": {
+          "passed": 2,
+          "recovered": 1,
+          "failed": 1,
+          "exitCode": 1
+        },
+        "userRequiredFactsReturned": 3,
+        "persistenceAfterRestart": "PASS",
+        "providerCalls": 8,
+        "toolCalls": 0,
+        "usage": {
+          "inputTokens": 9589,
+          "outputTokens": 449
+        },
+        "cases": [
+          {
+            "pair": "meeting",
+            "fact": "I have an Infosys meeting on 23 August.",
+            "question": "What meeting did I tell you about?",
+            "required": [
+              "Infosys",
+              "23 August"
+            ],
+            "strictStatus": "RECOVERED",
+            "recordedOrigin": "recovered",
+            "rawModelResponse": "{\"answer\":\"You told me about an Infosys meeting on 23 August.\",\"memoryEvidence\":[{\"messageId\":\"bb723b3a-2483-47c5-8608-28098904b734\",\"quote\":\"I have an Infosys meeting on 23 August.\"}]}",
+            "selected": [
+              {
+                "messageId": "bb723b3a-2483-47c5-8608-28098904b734",
+                "quote": "I have an Infosys meeting on 23 August."
+              }
+            ],
+            "contextOmitted": 0,
+            "evidence": [
+              {
+                "conversationId": "36eeb0d8-2260-4466-b612-7d8a5ae8fa96",
+                "turnId": "bb723b3a-2483-47c5-8608-28098904b734",
+                "user": {
+                  "id": "8fb8d735-b826-453e-91cf-87bff800a0ce",
+                  "role": "user",
+                  "content": "I have an Infosys meeting on 23 August.",
+                  "timestamp": "2026-11-22T07:15:31.797Z"
+                },
+                "assistant": {
+                  "id": "ac479a4b-1741-415a-8105-654447acd999",
+                  "role": "assistant",
+                  "content": "Noted: you have an Infosys meeting on 23 August.\n\nI can help you turn that into a calendar entry, prep notes, or set a reminder—if you want, tell me the year and time.",
+                  "timestamp": "2026-11-22T07:15:35.652Z"
+                },
+                "timezone": "Asia/Kolkata"
+              }
+            ],
+            "finalReturnedAnswer": "Here is the relevant stored conversation:\n\nYou wrote — sent 22 Nov 2026, 12:45 (Asia/Kolkata):\n\n> I have an Infosys meeting on 23 August.\n\nConversation 36eeb0d8-2260-4466-b612-7d8a5ae8fa96; message 8fb8d735-b826-453e-91cf-87bff800a0ce.\n\nThe assistant answered (unverified) — sent 22 Nov 2026, 12:45 (Asia/Kolkata):\n\n> Noted: you have an Infosys meeting on 23 August.\n> \n> I can help you turn that into a calendar entry, prep notes, or set a reminder—if you want, tell me the year and time.\n\nConversation 36eeb0d8-2260-4466-b612-7d8a5ae8fa96; message ac479a4b-1741-415a-8105-654447acd999.\n\nSent dates identify messages, not event dates. Quoted statements are historical evidence, not confirmation that they remain current.",
+            "finalValidatorReplayDecision": "evidence_reference",
+            "finalValidatorReplayMatches": true,
+            "finalValidatorReplayOrigin": "recovered",
+            "recallProviderMs": 1144,
+            "pairTotalMs": 5253
+          },
+          {
+            "pair": "project database",
+            "fact": "I selected PostgreSQL as the database for my project CedarLedger-ab93bf29.",
+            "question": "Which database did I select for CedarLedger-ab93bf29?",
+            "required": [
+              "PostgreSQL",
+              "CedarLedger-ab93bf29"
+            ],
+            "strictStatus": "PASS",
+            "recordedOrigin": "model",
+            "rawModelResponse": "{\"answer\":\"You selected PostgreSQL for CedarLedger-ab93bf29.\",\"memoryEvidence\":[{\"messageId\":\"ef25dbca-2656-4d7e-a50c-9d0f9eb1b106\",\"quote\":\"I selected PostgreSQL as the database for my project CedarLedger-ab93bf29.\"}]}",
+            "selected": [
+              {
+                "messageId": "ef25dbca-2656-4d7e-a50c-9d0f9eb1b106",
+                "quote": "I selected PostgreSQL as the database for my project CedarLedger-ab93bf29."
+              }
+            ],
+            "contextOmitted": 0,
+            "evidence": [
+              {
+                "conversationId": "ae90b9e0-917a-471a-83ad-72c8cc4e5b4a",
+                "turnId": "b1db82a5-97a8-461a-b384-1879333bc80a",
+                "user": {
+                  "id": "ef25dbca-2656-4d7e-a50c-9d0f9eb1b106",
+                  "role": "user",
+                  "content": "I selected PostgreSQL as the database for my project CedarLedger-ab93bf29.",
+                  "timestamp": "2026-11-22T07:15:37.008Z"
+                },
+                "assistant": {
+                  "id": "1921e98f-8f31-4c84-a31d-1c31bf5e038d",
+                  "role": "assistant",
+                  "content": "Got it — for your project **CedarLedger-ab93bf29**, you selected **PostgreSQL** as the database.\n\nI’m treating that as your project choice going forward.",
+                  "timestamp": "2026-11-22T07:15:38.757Z"
+                },
+                "timezone": "Asia/Kolkata"
+              }
+            ],
+            "finalReturnedAnswer": "You selected PostgreSQL for CedarLedger-ab93bf29.",
+            "finalValidatorReplayDecision": "model_synthesis",
+            "finalValidatorReplayMatches": true,
+            "finalValidatorReplayOrigin": "model",
+            "recallProviderMs": 1460,
+            "pairTotalMs": 3351
+          },
+          {
+            "pair": "laptop purchase",
+            "fact": "I purchased a notebook computer from Dell for FieldKit-ab93bf29.",
+            "question": "Which laptop brand did I buy for FieldKit-ab93bf29?",
+            "required": [
+              "Dell",
+              "FieldKit-ab93bf29"
+            ],
+            "strictStatus": "FAIL",
+            "recordedOrigin": "model",
+            "rawModelResponse": "{\"answer\":\"Dell\",\"memoryEvidence\":[{\"messageId\":\"30d39aba-4599-4688-adfb-8b9b53225ae0\",\"quote\":\"I purchased a notebook computer from Dell for FieldKit-ab93bf29.\"}]}",
+            "selected": [
+              {
+                "messageId": "30d39aba-4599-4688-adfb-8b9b53225ae0",
+                "quote": "I purchased a notebook computer from Dell for FieldKit-ab93bf29."
+              }
+            ],
+            "contextOmitted": 0,
+            "evidence": [
+              {
+                "conversationId": "f07b157d-5a2e-4c89-a2da-6bc405195f12",
+                "turnId": "0ad373cb-128d-4c3c-9a23-f371dccda9c0",
+                "user": {
+                  "id": "30d39aba-4599-4688-adfb-8b9b53225ae0",
+                  "role": "user",
+                  "content": "I purchased a notebook computer from Dell for FieldKit-ab93bf29.",
+                  "timestamp": "2026-11-22T07:15:40.348Z"
+                },
+                "assistant": {
+                  "id": "a77ddbfe-d87a-40dd-a260-3c224e8df887",
+                  "role": "assistant",
+                  "content": "Got it — you purchased a Dell notebook computer for **FieldKit-ab93bf29**.\n\nIf you want, I can help you turn that into a clean record or receipt note.",
+                  "timestamp": "2026-11-22T07:15:42.314Z"
+                },
+                "timezone": "Asia/Kolkata"
+              }
+            ],
+            "finalReturnedAnswer": "Dell",
+            "finalValidatorReplayDecision": "association_incomplete",
+            "finalValidatorReplayMatches": false,
+            "finalValidatorReplayOrigin": "recovered",
+            "recallProviderMs": 1217,
+            "pairTotalMs": 3345
+          },
+          {
+            "pair": "person and task",
+            "fact": "I asked Priya to review the deployment checklist for CedarRelease-ab93bf29.",
+            "question": "Who did I ask to review the deployment checklist for CedarRelease-ab93bf29?",
+            "required": [
+              "Priya",
+              "deployment checklist",
+              "CedarRelease-ab93bf29"
+            ],
+            "strictStatus": "PASS",
+            "recordedOrigin": "model",
+            "rawModelResponse": "{\"answer\":\"You asked Priya to review the deployment checklist for CedarRelease-ab93bf29.\",\"memoryEvidence\":[{\"messageId\":\"a5eb30ee-521c-43ce-a726-6736fcfe2a6b\",\"quote\":\"I asked Priya to review the deployment checklist for CedarRelease-ab93bf29.\"}]}",
+            "selected": [
+              {
+                "messageId": "a5eb30ee-521c-43ce-a726-6736fcfe2a6b",
+                "quote": "I asked Priya to review the deployment checklist for CedarRelease-ab93bf29."
+              }
+            ],
+            "contextOmitted": 0,
+            "evidence": [
+              {
+                "conversationId": "9c192e64-4ffc-48f8-9ad4-4a4b60baa89a",
+                "turnId": "f8462ef8-3f34-4233-b485-4af7d5df9115",
+                "user": {
+                  "id": "a5eb30ee-521c-43ce-a726-6736fcfe2a6b",
+                  "role": "user",
+                  "content": "I asked Priya to review the deployment checklist for CedarRelease-ab93bf29.",
+                  "timestamp": "2026-11-22T07:15:43.694Z"
+                },
+                "assistant": {
+                  "id": "3a885354-dfa8-4618-b111-c80ed7cbf61b",
+                  "role": "assistant",
+                  "content": "Noted: you asked Priya to review the deployment checklist for CedarRelease-ab93bf29.\n\nI don’t have any prior stored conversation record here to verify that against, so I’m treating",
+                  "timestamp": "2026-11-22T07:15:45.217Z"
+                },
+                "timezone": "Asia/Kolkata"
+              }
+            ],
+            "finalReturnedAnswer": "You asked Priya to review the deployment checklist for CedarRelease-ab93bf29.",
+            "finalValidatorReplayDecision": "model_synthesis",
+            "finalValidatorReplayMatches": true,
+            "finalValidatorReplayOrigin": "model",
+            "recallProviderMs": 971,
+            "pairTotalMs": 2638
+          }
+        ]
+      },
+      {
+        "phase": "after",
+        "timestamp": "2026-11-22T07:23:29.210Z",
+        "strict": {
+          "passed": 3,
+          "recovered": 1,
+          "failed": 0,
+          "exitCode": 1
+        },
+        "userRequiredFactsReturned": 4,
+        "persistenceAfterRestart": "PASS",
+        "providerCalls": 8,
+        "toolCalls": 0,
+        "usage": {
+          "inputTokens": 9596,
+          "outputTokens": 513
+        },
+        "cases": [
+          {
+            "pair": "meeting",
+            "fact": "I have an Infosys meeting on 23 August.",
+            "question": "What meeting did I tell you about?",
+            "required": [
+              "Infosys",
+              "23 August"
+            ],
+            "strictStatus": "PASS",
+            "recordedOrigin": "model",
+            "rawModelResponse": "{\"answer\":\"You told me about an Infosys meeting on 23 August.\",\"memoryEvidence\":[{\"messageId\":\"64f34574-e82a-45ef-a560-4cee9eec4b85\",\"quote\":\"I have an Infosys meeting on 23 August.\"}]}",
+            "selected": [
+              {
+                "messageId": "64f34574-e82a-45ef-a560-4cee9eec4b85",
+                "quote": "I have an Infosys meeting on 23 August."
+              }
+            ],
+            "contextOmitted": 0,
+            "evidence": [
+              {
+                "conversationId": "20fb4959-ed78-431e-b771-216d5c2b12d2",
+                "turnId": "20802633-19b3-4a46-ad94-8510c8c1bea0",
+                "user": {
+                  "id": "64f34574-e82a-45ef-a560-4cee9eec4b85",
+                  "role": "user",
+                  "content": "I have an Infosys meeting on 23 August.",
+                  "timestamp": "2026-11-22T07:23:19.572Z"
+                },
+                "assistant": {
+                  "id": "29367ac4-18b7-4bb8-9c26-6aa68550c2d7",
+                  "role": "assistant",
+                  "content": "Noted — you have an Infosys meeting on 23 August.\n\nI don’t have enough context to know the year, time, or location, so I can’t turn that into a fully scheduled event yet. If you wa",
+                  "timestamp": "2026-11-22T07:23:21.261Z"
+                },
+                "timezone": "Asia/Kolkata"
+              }
+            ],
+            "finalReturnedAnswer": "You told me about an Infosys meeting on 23 August.",
+            "finalValidatorReplayDecision": "model_synthesis",
+            "finalValidatorReplayMatches": true,
+            "finalValidatorReplayOrigin": "model",
+            "recallProviderMs": 931,
+            "pairTotalMs": 3043
+          },
+          {
+            "pair": "project database",
+            "fact": "I selected PostgreSQL as the database for my project CedarLedger-c80412f1.",
+            "question": "Which database did I select for CedarLedger-c80412f1?",
+            "required": [
+              "PostgreSQL",
+              "CedarLedger-c80412f1"
+            ],
+            "strictStatus": "PASS",
+            "recordedOrigin": "model",
+            "rawModelResponse": "{\"answer\":\"You selected PostgreSQL for CedarLedger-c80412f1.\",\"memoryEvidence\":[{\"messageId\":\"64df2424-a192-4de5-b799-f6cc34e7cfe6\",\"quote\":\"I selected PostgreSQL as the database for my project CedarLedger-c80412f1.\"}]}",
+            "selected": [
+              {
+                "messageId": "64df2424-a192-4de5-b799-f6cc34e7cfe6",
+                "quote": "I selected PostgreSQL as the database for my project CedarLedger-c80412f1."
+              }
+            ],
+            "contextOmitted": 0,
+            "evidence": [
+              {
+                "conversationId": "803ed66a-bcdb-4062-ac2b-ee6f00e3259a",
+                "turnId": "7316c007-07f9-4543-92bf-033ec29ee138",
+                "user": {
+                  "id": "64df2424-a192-4de5-b799-f6cc34e7cfe6",
+                  "role": "user",
+                  "content": "I selected PostgreSQL as the database for my project CedarLedger-c80412f1.",
+                  "timestamp": "2026-11-22T07:23:22.566Z"
+                },
+                "assistant": {
+                  "id": "39f3f6ac-d2dc-4fa2-abc0-aff3b587b643",
+                  "role": "assistant",
+                  "content": "Noted — for your project **CedarLedger-c80412f1**, you selected **PostgreSQL** as the database.",
+                  "timestamp": "2026-11-22T07:23:23.816Z"
+                },
+                "timezone": "Asia/Kolkata"
+              }
+            ],
+            "finalReturnedAnswer": "You selected PostgreSQL for CedarLedger-c80412f1.",
+            "finalValidatorReplayDecision": "model_synthesis",
+            "finalValidatorReplayMatches": true,
+            "finalValidatorReplayOrigin": "model",
+            "recallProviderMs": 901,
+            "pairTotalMs": 2281
+          },
+          {
+            "pair": "laptop purchase",
+            "fact": "I purchased a notebook computer from Dell for FieldKit-c80412f1.",
+            "question": "Which laptop brand did I buy for FieldKit-c80412f1?",
+            "required": [
+              "Dell",
+              "FieldKit-c80412f1"
+            ],
+            "strictStatus": "RECOVERED",
+            "recordedOrigin": "recovered",
+            "rawModelResponse": "{\"answer\":\"You bought a Dell notebook computer for FieldKit-c80412f1.\",\"memoryEvidence\":[{\"messageId\":\"329cc65b-0eff-4eed-bf3f-4a051a0cc513\",\"quote\":\"I purchased a notebook computer from Dell for FieldKit-c80412f1.\"},{\"messageId\":\"51e3f9f6-430b-440f-9a70-f79682542a8e\",\"quote\":\"Got it — you purchased a Dell notebook computer for FieldKit-c80412f1.\"}]}",
+            "selected": [
+              {
+                "messageId": "329cc65b-0eff-4eed-bf3f-4a051a0cc513",
+                "quote": "I purchased a notebook computer from Dell for FieldKit-c80412f1."
+              },
+              {
+                "messageId": "51e3f9f6-430b-440f-9a70-f79682542a8e",
+                "quote": "Got it — you purchased a Dell notebook computer for FieldKit-c80412f1."
+              }
+            ],
+            "contextOmitted": 0,
+            "evidence": [
+              {
+                "conversationId": "c8c3e582-c9b7-452a-a850-25eb83409a52",
+                "turnId": "97fcaf71-e151-4386-bd83-b7f4882fe72e",
+                "user": {
+                  "id": "329cc65b-0eff-4eed-bf3f-4a051a0cc513",
+                  "role": "user",
+                  "content": "I purchased a notebook computer from Dell for FieldKit-c80412f1.",
+                  "timestamp": "2026-11-22T07:23:24.832Z"
+                },
+                "assistant": {
+                  "id": "51e3f9f6-430b-440f-9a70-f79682542a8e",
+                  "role": "assistant",
+                  "content": "Got it — you purchased a Dell notebook computer for FieldKit-c80412f1.",
+                  "timestamp": "2026-11-22T07:23:25.849Z"
+                },
+                "timezone": "Asia/Kolkata"
+              }
+            ],
+            "finalReturnedAnswer": "Here is the relevant stored conversation:\n\nYou wrote — sent 22 Nov 2026, 12:53 (Asia/Kolkata):\n\n> I purchased a notebook computer from Dell for FieldKit-c80412f1.\n\nConversation c8c3e582-c9b7-452a-a850-25eb83409a52; message 329cc65b-0eff-4eed-bf3f-4a051a0cc513.\n\nThe assistant answered (unverified) — sent 22 Nov 2026, 12:53 (Asia/Kolkata):\n\n> Got it — you purchased a Dell notebook computer for FieldKit-c80412f1.\n\nConversation c8c3e582-c9b7-452a-a850-25eb83409a52; message 51e3f9f6-430b-440f-9a70-f79682542a8e.\n\nSent dates identify messages, not event dates. Quoted statements are historical evidence, not confirmation that they remain current.",
+            "finalValidatorReplayDecision": "grounding_rejected",
+            "finalValidatorReplayMatches": true,
+            "finalValidatorReplayOrigin": "recovered",
+            "recallProviderMs": 1006,
+            "pairTotalMs": 2150
+          },
+          {
+            "pair": "person and task",
+            "fact": "I asked Priya to review the deployment checklist for CedarRelease-c80412f1.",
+            "question": "Who did I ask to review the deployment checklist for CedarRelease-c80412f1?",
+            "required": [
+              "Priya",
+              "deployment checklist",
+              "CedarRelease-c80412f1"
+            ],
+            "strictStatus": "PASS",
+            "recordedOrigin": "model",
+            "rawModelResponse": "{\"answer\":\"You asked Priya to review the deployment checklist for CedarRelease-c80412f1.\",\"memoryEvidence\":[{\"messageId\":\"52574fc7-31b0-4420-bfc4-c585b7fdee1f\",\"quote\":\"I asked Priya to review the deployment checklist for CedarRelease-c80412f1.\"}]}",
+            "selected": [
+              {
+                "messageId": "52574fc7-31b0-4420-bfc4-c585b7fdee1f",
+                "quote": "I asked Priya to review the deployment checklist for CedarRelease-c80412f1."
+              }
+            ],
+            "contextOmitted": 0,
+            "evidence": [
+              {
+                "conversationId": "14c75766-ab73-4f56-81d9-8d8c2b8bba5f",
+                "turnId": "c3b2b7d7-213f-40f3-98e4-06bb4e4a7e31",
+                "user": {
+                  "id": "52574fc7-31b0-4420-bfc4-c585b7fdee1f",
+                  "role": "user",
+                  "content": "I asked Priya to review the deployment checklist for CedarRelease-c80412f1.",
+                  "timestamp": "2026-11-22T07:23:26.986Z"
+                },
+                "assistant": {
+                  "id": "706a4c8f-5333-443b-b67a-3c6db549f472",
+                  "role": "assistant",
+                  "content": "Got it — your record says you asked Priya to review the deployment checklist for **CedarRelease-c80412f1**.\n\nI can keep that as the current working context, but I can’t verify it f",
+                  "timestamp": "2026-11-22T07:23:28.182Z"
+                },
+                "timezone": "Asia/Kolkata"
+              }
+            ],
+            "finalReturnedAnswer": "You asked Priya to review the deployment checklist for CedarRelease-c80412f1.",
+            "finalValidatorReplayDecision": "model_synthesis",
+            "finalValidatorReplayMatches": true,
+            "finalValidatorReplayOrigin": "model",
+            "recallProviderMs": 843,
+            "pairTotalMs": 2186
+          }
+        ]
+      }
+    ],
+    "finalReplay": "All four post-fix answers/origins match the final validator, including subsequent lowercase-association hardening. No further live calls.",
+    "researchComparison": "Production changes concern recall grounding/instructions; no new live search/comparison call. Existing frozen mixed-comparison/search/transport/config/storage regressions passed.",
+    "manualBrowser": "Not claimed; HTTP/SSE and automated DOM coverage are separate.",
+    "externalReview": "CodeRabbit executable could not be resolved; availability unknown. No external review claimed."
+  },
+  "latency": {
+    "limits": "25s deadline; 15s search cutoff; 5+3 queries; 2 provider-search concurrency; no change.",
+    "usage": "Exactly eight configured Azure calls per four-pair run; no retry, second judge, tool call or Tavily request in either run.",
+    "recallInstructionBytes": {
+      "before": 452,
+      "after": 446
+    },
+    "localMicrobenchmark": {
+      "kind": "Local microbenchmark of eight synthetic responses; 20 warmups, 100 iterations each; not provider or production latency.",
+      "rows": [
+        {
+          "phase": "before/meeting",
+          "validator": "before",
+          "iterations": 100,
+          "meanMs": 3.083731000000009,
+          "p95Ms": 4.737599999999929
+        },
+        {
+          "phase": "before/meeting",
+          "validator": "after",
+          "iterations": 100,
+          "meanMs": 2.892449000000006,
+          "p95Ms": 4.389999999999873
+        },
+        {
+          "phase": "before/project database",
+          "validator": "before",
+          "iterations": 100,
+          "meanMs": 0.03355799999999817,
+          "p95Ms": 0.0524000000000342
+        },
+        {
+          "phase": "before/project database",
+          "validator": "after",
+          "iterations": 100,
+          "meanMs": 0.05535699999999906,
+          "p95Ms": 0.08910000000014406
+        },
+        {
+          "phase": "before/laptop purchase",
+          "validator": "before",
+          "iterations": 100,
+          "meanMs": 0.03080199999996694,
+          "p95Ms": 0.05209999999988213
+        },
+        {
+          "phase": "before/laptop purchase",
+          "validator": "after",
+          "iterations": 100,
+          "meanMs": 0.3051089999999658,
+          "p95Ms": 0.7056999999999789
+        },
+        {
+          "phase": "before/person and task",
+          "validator": "before",
+          "iterations": 100,
+          "meanMs": 0.030129999999971915,
+          "p95Ms": 0.03780000000006112
+        },
+        {
+          "phase": "before/person and task",
+          "validator": "after",
+          "iterations": 100,
+          "meanMs": 0.06584499999999935,
+          "p95Ms": 0.1356999999998152
+        },
+        {
+          "phase": "after/meeting",
+          "validator": "before",
+          "iterations": 100,
+          "meanMs": 3.579109999999996,
+          "p95Ms": 6.111499999999978
+        },
+        {
+          "phase": "after/meeting",
+          "validator": "after",
+          "iterations": 100,
+          "meanMs": 2.740486999999998,
+          "p95Ms": 4.792899999999918
+        },
+        {
+          "phase": "after/project database",
+          "validator": "before",
+          "iterations": 100,
+          "meanMs": 0.05394999999998163,
+          "p95Ms": 0.0909999999998945
+        },
+        {
+          "phase": "after/project database",
+          "validator": "after",
+          "iterations": 100,
+          "meanMs": 0.047880000000004655,
+          "p95Ms": 0.06750000000010914
+        },
+        {
+          "phase": "after/laptop purchase",
+          "validator": "before",
+          "iterations": 100,
+          "meanMs": 0.29737199999999575,
+          "p95Ms": 0.5190999999999804
+        },
+        {
+          "phase": "after/laptop purchase",
+          "validator": "after",
+          "iterations": 100,
+          "meanMs": 0.3325750000000198,
+          "p95Ms": 0.5408999999999651
+        },
+        {
+          "phase": "after/person and task",
+          "validator": "before",
+          "iterations": 100,
+          "meanMs": 0.025520000000019537,
+          "p95Ms": 0.03139999999984866
+        },
+        {
+          "phase": "after/person and task",
+          "validator": "after",
+          "iterations": 100,
+          "meanMs": 0.05773800000000847,
+          "p95Ms": 0.10730000000012296
+        }
+      ]
+    },
+    "interpretation": "Small noncontrolled samples with different generation/validation paths. Do not claim a speedup or accuracy improvement rate."
+  },
+  "traceRetention": {
+    "data": "Only owned synthetic live archive; no credentials, headers, private archive or raw provider errors.",
+    "exactInputsAndOutputs": [
+      ".data/recall-reliability/live-before.json",
+      ".data/recall-reliability/live-after.json"
+    ],
+    "fullModelInputShape": "system prompt + JSON untrustedHistoricalData + question; recall tools empty; no omitted record; complete short user facts.",
+    "regeneratedBy": "npm run test:live -- --live --runs=1 (explicit quota-consuming opt-in)"
+  },
+  "security": {
+    "protectedFiles": 240,
+    "changedProtected": 0,
+    "refsUnchanged": true,
+    "envTracked": false,
+    "envIgnored": true,
+    "historyAudit": "55 commits, 360 blobs, 23 branches; no findings. New dirty candidate scanned separately.",
+    "noDependenciesChangedSinceCleanupBaseline": true,
+    "acceptanceEvaluatorUnchanged": true,
+    "finalWorkingTreeScan": {
+      "files": 105,
+      "findings": 0,
+      "originalTestsMissing": 0,
+      "unchangedHistoricalSnapshots": 9,
+      "cleanCodeFiles": 80,
+      "cleanDifferences": 0,
+      "brokenMarkdownLinks": 0
+    }
+  },
+  "limitations": [
+    "Strict all-model-synthesis gate still exits 1 because one correct recovery remains.",
+    "English capitalized-name/compound-identifier matching is a bounded lexical safeguard, not arbitrary semantic validation.",
+    "A correct factual paraphrase may recover; large full evidence can require a narrower query.",
+    "Exact raw causes for historical untraced recovered requests remain unknown.",
+    "Offline baseline covers ten memory fixtures with a scripted model, not all 31 application cases or live accuracy."
+  ],
+  "git": {
+    "branch": "fix/main-regression-recovery",
+    "head": "63237c07d0bb757bf0218df8a920f60ef79e64c4",
+    "main": "3fb014883b663195c2ba862f4fa36304272f14e2",
+    "committed": false,
+    "merged": false,
+    "pushed": false,
+    "deployed": false,
+    "branchesDeleted": false,
+    "historyRewritten": false,
+    "incrementalModified": [
+      "docs/ENGINEERING_JOURNEY.md",
+      "DESIGN.md",
+      "README.md",
+      "docs/evaluation.md",
+      "docs/verification.md",
+      "scripts/evaluate-offline.mjs",
+      "scripts/live-e2e.ts",
+      "src/prompts.ts",
+      "src/recall-answer.ts"
+    ],
+    "incrementalRemoved": [],
+    "incrementalAdded": [
+      "tests/recall-associations.test.ts",
+      "tests/search-baseline.test.ts",
+      "docs/results/recall-reliability.json"
+    ],
+    "completeWorkingTreePaths": [
+      " M .env.example",
+      " M .gitignore",
+      " M AGENT.md",
+      " M DESIGN.md",
+      " M README.md",
+      " D ROOT_CAUSE.md",
+      " M docs/agent-core.md",
+      " M docs/chat-sse.md",
+      " D docs/evaluation-results.json",
+      " M docs/evaluation.md",
+      " D docs/gate2-review-repairs.md",
+      " D docs/live-e2e-results.json",
+      " D docs/live-memory-changes.md",
+      " D docs/memory-evaluation.json",
+      " D docs/memory-reliability.md",
+      " M docs/memory.md",
+      " D docs/recovery-audit.json",
+      " D docs/recovery-clean-results.json",
+      " D docs/recovery-evaluation-results.json",
+      " D docs/recovery-http-results.json",
+      " D docs/recovery-live-results.json",
+      " D docs/recovery-memory-results.json",
+      " M docs/verification.md",
+      " M package-lock.json",
+      " M package.json",
+      " D scripts/diagnose-model.ts",
+      " D scripts/diagnose-stream.ts",
+      " M scripts/evaluate-offline.mjs",
+      " M scripts/live-e2e.ts",
+      " D scripts/reproduce-memory.ts",
+      " M src/memory-http.ts",
+      " M src/prompts.ts",
+      " M src/recall-answer.ts",
+      " M src/request-log.ts",
+      " M src/server.ts",
+      " M src/verification.ts",
+      " M tests/context.test.ts",
+      " M tests/evaluation.test.ts",
+      " M tests/gate3-change-verification.test.ts",
+      " M tests/memory-http.test.ts",
+      " M tests/observability.test.ts",
+      " M tests/synthesis.test.ts",
+      " M tests/tool-call-schema.test.ts",
+      " M tests/universal-memory.test.ts",
+      " M tsconfig.json",
+      "?? docs/ENGINEERING_JOURNEY.md",
+      "?? docs/results/cleanup-verification.json",
+      "?? docs/results/evaluation-results.json",
+      "?? docs/results/live-e2e-results.json",
+      "?? docs/results/memory-evaluation.json",
+      "?? docs/results/recall-reliability.json",
+      "?? docs/results/recovery-audit.json",
+      "?? docs/results/recovery-clean-results.json",
+      "?? docs/results/recovery-evaluation-results.json",
+      "?? docs/results/recovery-http-results.json",
+      "?? docs/results/recovery-live-results.json",
+      "?? docs/results/recovery-memory-results.json",
+      "?? scripts/audit-history.ts",
+      "?? tests/history-audit.test.ts",
+      "?? tests/live-harness.test.ts",
+      "?? tests/recall-associations.test.ts",
+      "?? tests/search-baseline.test.ts"
+    ],
+    "statusCounts": {
+      "modified": 29,
+      "removedFromOldPaths": 16,
+      "new": 17
+    }
+  }
+}

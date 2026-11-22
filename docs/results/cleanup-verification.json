@@ -1,0 +1,341 @@
+{
+  "date": "2026-11-22",
+  "scope": "Uncommitted cleanup candidate on fix/main-regression-recovery; authentic history unchanged.",
+  "verdict": "NOT READY",
+  "reason": "Strict final live recall acceptance is 1 PASS, 2 RECOVERED, 1 FAIL. The model-origin failing answer was Dell, but omitted the expected project identifier. No benchmark criterion or grounding guard was relaxed.",
+  "cleanup": {
+    "removed": [
+      "scripts/diagnose-model.ts",
+      "scripts/diagnose-stream.ts",
+      "scripts/reproduce-memory.ts",
+      "ROOT_CAUSE.md",
+      "docs/live-memory-changes.md",
+      "docs/memory-reliability.md",
+      "docs/gate2-review-repairs.md"
+    ],
+    "removalReasons": "Individually documented in ENGINEERING_JOURNEY.md; relevant conclusions/tests/history retained.",
+    "relocatedSnapshots": 9,
+    "originalTestsRetained": 33,
+    "newTestFiles": 2,
+    "dependenciesRemoved": [],
+    "dependencyVersionChanges": [],
+    "runtimeReclassification": "tsx 4.23.15 moved from devDependencies to dependencies because npm start needs it.",
+    "generatedOutputs": ".data/evaluations and .data/audits, ignored by Git",
+    "localStitchExports": "Preserved under ignored frontend/"
+  },
+  "fixes": [
+    "Apply DEFAULT_TIMEZONE when input omits timezone; explicit input wins.",
+    "Use the original IANA timezone for historical Q&A headings.",
+    "Do not log raw conversation excerpts, including under DEBUG_MEMORY=1.",
+    "Replace two any-typed recall boundary fields with inferred record/message types.",
+    "Enable unused-local/parameter checks and remove confirmed unused imports.",
+    "Require --live; own an isolated archive/server; acknowledge receipts and verify persistence after restart.",
+    "Clarify JSON-only recall format within the original context budget; strict parsing unchanged."
+  ],
+  "verification": {
+    "node": "24.14.1",
+    "npm": "11.21.2",
+    "npmCi": "PASS, 109 packages; initial locked-esbuild EPERM resolved by stopping owned watcher.",
+    "cleanNpmInstall": "PASS, 109 packages; source snapshot had no existing node_modules, .env, private archive or IDE config.",
+    "dependencyAudit": "0 reported vulnerabilities; no package upgrades/removals.",
+    "typecheck": "PASS primary and clean; server plus browser",
+    "lint": "PASS, 0 hygiene errors",
+    "diffCheck": "PASS",
+    "primaryTests": {
+      "files": 35,
+      "passed": 1005,
+      "skipped": 1,
+      "failed": 0,
+      "seconds": 24.85
+    },
+    "cleanTests": {
+      "files": 35,
+      "passed": 1005,
+      "skipped": 1,
+      "failed": 0,
+      "seconds": 25.05
+    },
+    "skip": "Existing Windows account cannot create file symlinks.",
+    "intermediateFailure": {
+      "test": "Adversarial Scenario 9: long-history context budgeting preserves essential record",
+      "cause": "Expanded recall instruction grew from 463 to 834 bytes.",
+      "correction": "Compressed to 452 bytes; original 8192-context test and limits unchanged.",
+      "finalTargetedResult": "38 tests passed; both complete suites passed afterward."
+    },
+    "offline": {
+      "cases": 31,
+      "safetyPass": 31,
+      "usefulnessPass": 30,
+      "limitation": "C8 abstains on synthetic untrusted authority."
+    },
+    "memory": {
+      "suiteTests": 39,
+      "kind": "Synthetic frozen history, mocked model; not live model accuracy",
+      "summary": {
+        "cases": 10,
+        "expectedConversations": 10,
+        "relevantRetrievedConversations": 10,
+        "unrelatedRetrievedConversations": 0,
+        "groundedCases": 10,
+        "retrievalP50Ms": 1.997000000000071,
+        "retrievalP95Ms": 36.59789999999998,
+        "mockedHttpMs": [
+          120.48170000000005
+        ]
+      }
+    },
+    "startup": [
+      {
+        "port": 3000,
+        "health": "ok",
+        "chatConfigured": true,
+        "listStatus": 200,
+        "total": 110
+      },
+      {
+        "port": 3117,
+        "health": "ok",
+        "chatConfigured": false,
+        "listStatus": 200,
+        "total": 0
+      },
+      {
+        "cleanCreate": true,
+        "chatStatus": 503,
+        "code": "CHAT_NOT_CONFIGURED",
+        "reopen": true,
+        "unsavedRejectedTurn": true
+      }
+    ],
+    "npmStart": "PASS in clean snapshot, own isolated archive and port 3121; health 200.",
+    "tavilySmoke": {
+      "status": "PASS",
+      "resultCount": 3,
+      "elapsedMs": 1499,
+      "reportedCredits": 1
+    },
+    "liveResearch": {
+      "status": "PASS",
+      "sources": 3,
+      "deltas": 24
+    },
+    "liveRecall": {
+      "initial": {
+        "timestamp": "2026-11-22T06:41:20.095Z",
+        "modelPass": 0,
+        "recovered": 4,
+        "failed": 0,
+        "rows": [
+          {
+            "run": 1,
+            "pair": "meeting",
+            "status": "RECOVERED",
+            "origin": "recovered"
+          },
+          {
+            "run": 1,
+            "pair": "project database",
+            "status": "RECOVERED",
+            "origin": "recovered"
+          },
+          {
+            "run": 1,
+            "pair": "laptop purchase",
+            "status": "RECOVERED",
+            "origin": "recovered"
+          },
+          {
+            "run": 1,
+            "pair": "person and task",
+            "status": "RECOVERED",
+            "origin": "recovered"
+          }
+        ],
+        "persistenceAfterRestart": "PASS",
+        "exitCode": 1
+      },
+      "expandedFormat": {
+        "timestamp": "2026-11-22T06:50:15.833Z",
+        "modelPass": 1,
+        "recovered": 3,
+        "failed": 0,
+        "rows": [
+          {
+            "run": 1,
+            "pair": "meeting",
+            "status": "RECOVERED",
+            "origin": "recovered"
+          },
+          {
+            "run": 1,
+            "pair": "project database",
+            "status": "PASS",
+            "origin": "model"
+          },
+          {
+            "run": 1,
+            "pair": "laptop purchase",
+            "status": "RECOVERED",
+            "origin": "recovered"
+          },
+          {
+            "run": 1,
+            "pair": "person and task",
+            "status": "RECOVERED",
+            "origin": "recovered"
+          }
+        ],
+        "persistenceAfterRestart": "PASS",
+        "exitCode": 1
+      },
+      "finalCompactFormat": {
+        "timestamp": "2026-11-22T07:00:53.368Z",
+        "modelPass": 1,
+        "recovered": 2,
+        "failed": 1,
+        "rows": [
+          {
+            "run": 1,
+            "pair": "meeting",
+            "status": "RECOVERED",
+            "origin": "recovered"
+          },
+          {
+            "run": 1,
+            "pair": "project database",
+            "status": "PASS",
+            "origin": "model"
+          },
+          {
+            "run": 1,
+            "pair": "laptop purchase",
+            "status": "FAIL",
+            "origin": "model",
+            "error": "expected evidence missing"
+          },
+          {
+            "run": 1,
+            "pair": "person and task",
+            "status": "RECOVERED",
+            "origin": "recovered"
+          }
+        ],
+        "persistenceAfterRestart": "PASS",
+        "exitCode": 1
+      },
+      "method": "One four-pair run per candidate; results are not a controlled comparative model-accuracy benchmark. Final prompt instruction is 452 bytes against original 463-byte budget."
+    },
+    "manualBrowser": "Not performed in cleanup; prior Computer Use attempt was blocked by inability to establish Chrome URL. HTTP/SSE and DOM checks are reported separately.",
+    "externalReview": "CodeRabbit CLI could not be resolved on PATH; no external review is claimed.",
+    "finalScannerTests": "8 passed in primary and 8 passed in clean after fixture-header assembly change; detection assertion unchanged.",
+    "historyAudit": "PASS: npm run audit:history, 55 commits, 360 blobs, 23 branches, no blocked branches. Final sandboxed attempts failed before audit in tsx Windows user lookup (ENOMEM); approved outside-sandbox rerun passed.",
+    "finalHealth": {
+      "url": "http://127.0.0.1:3000",
+      "status": 200,
+      "chatConfigured": true,
+      "listStatus": 200,
+      "total": 110
+    }
+  },
+  "security": {
+    "historyCommits": 55,
+    "historyBlobs": 360,
+    "localBranches": 23,
+    "detectedSecretOrPrivateFileFindings": 0,
+    "limits": "Heuristic patterns and in-memory comparison to project-local credentials, plus source/docs review; standard Git identity remains public. Future commits and dirty worker changes require another scan.",
+    "protectedFiles": 240,
+    "changedProtectedFiles": 0,
+    "envIgnored": true,
+    "envTracked": false,
+    "realConversationArchiveFiles": 110,
+    "fixtureReview": "Final candidate scan initially matched the synthetic key header in its own regression test. The header is now assembled at runtime; the same detection assertion remains, with no scanner exemption.",
+    "finalCandidate": {
+      "files": 102,
+      "findings": 0,
+      "markdownFiles": 11,
+      "brokenLinks": 0,
+      "cleanCodeFiles": 78,
+      "codeDifferences": 0
+    }
+  },
+  "git": {
+    "head": "63237c07d0bb757bf0218df8a920f60ef79e64c4",
+    "main": "3fb014883b663195c2ba862f4fa36304272f14e2",
+    "originMain": "3fb014883b663195c2ba862f4fa36304272f14e2",
+    "committed": false,
+    "merged": false,
+    "pushed": false,
+    "branchesDeleted": false,
+    "historyRewritten": false,
+    "modified": [
+      ".env.example",
+      ".gitignore",
+      "AGENT.md",
+      "DESIGN.md",
+      "README.md",
+      "docs/agent-core.md",
+      "docs/chat-sse.md",
+      "docs/evaluation.md",
+      "docs/memory.md",
+      "docs/verification.md",
+      "package-lock.json",
+      "package.json",
+      "scripts/live-e2e.ts",
+      "src/memory-http.ts",
+      "src/prompts.ts",
+      "src/recall-answer.ts",
+      "src/request-log.ts",
+      "src/server.ts",
+      "src/verification.ts",
+      "tests/context.test.ts",
+      "tests/evaluation.test.ts",
+      "tests/gate3-change-verification.test.ts",
+      "tests/memory-http.test.ts",
+      "tests/observability.test.ts",
+      "tests/synthesis.test.ts",
+      "tests/tool-call-schema.test.ts",
+      "tests/universal-memory.test.ts",
+      "tsconfig.json"
+    ],
+    "removedFromOldPaths": [
+      "ROOT_CAUSE.md",
+      "docs/evaluation-results.json",
+      "docs/gate2-review-repairs.md",
+      "docs/live-e2e-results.json",
+      "docs/live-memory-changes.md",
+      "docs/memory-evaluation.json",
+      "docs/memory-reliability.md",
+      "docs/recovery-audit.json",
+      "docs/recovery-clean-results.json",
+      "docs/recovery-evaluation-results.json",
+      "docs/recovery-http-results.json",
+      "docs/recovery-live-results.json",
+      "docs/recovery-memory-results.json",
+      "scripts/diagnose-model.ts",
+      "scripts/diagnose-stream.ts",
+      "scripts/reproduce-memory.ts"
+    ],
+    "newPaths": [
+      "docs/ENGINEERING_JOURNEY.md",
+      "docs/results/cleanup-verification.json",
+      "docs/results/evaluation-results.json",
+      "docs/results/live-e2e-results.json",
+      "docs/results/memory-evaluation.json",
+      "docs/results/recovery-audit.json",
+      "docs/results/recovery-clean-results.json",
+      "docs/results/recovery-evaluation-results.json",
+      "docs/results/recovery-http-results.json",
+      "docs/results/recovery-live-results.json",
+      "docs/results/recovery-memory-results.json",
+      "scripts/audit-history.ts",
+      "tests/history-audit.test.ts",
+      "tests/live-harness.test.ts"
+    ]
+  },
+  "remaining": [
+    "Strict model-only recall gate remains non-passing; correct bounded fallback is not relabeled as model synthesis.",
+    "No measured always-search baseline exists.",
+    "Finite comparison grammar/official-domain list retains a conservative usefulness abstention.",
+    "Cleanup and recovery are not integrated into public main; approval is required before commit, merge or publication."
+  ]
+}

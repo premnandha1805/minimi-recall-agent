@@ -1,180 +1,42 @@
-# HTTP chat contract: recall.chat.v1
+# Chat HTTP/SSE contract: recall.chat.v1
 
-This interim integration uses **SSE progress plus one validated final/partial
-answer, not token streaming**. The existing Azure adapter sends `stream: false`.
-True token streaming remains a future requirement. Server-backed browser restoration and receipt acknowledgment are implemented;
-temporal recall/context integration and quotation verification remain outstanding. Live Azure
-deployment compatibility, account quota and measured live latency are unverified.
+The authoritative schemas are in `src/contracts.ts`; the server owns framing in `src/sse.ts`, and the browser validates streams in `public/api.js`. Production Azure output streams. The native JSON adapter remains an injectable non-streaming boundary for compatible callers and frozen tests.
 
-## Request and credential preflight
+## Admission and liveness
 
-`POST /api/chat` accepts the unchanged `ChatRequestSchema`: message (1–16,000
-characters), optional safe conversationId (128 characters), IANA timezone, and up
-to 100 timestamped history messages (32,000 characters each). The default body
-limit is 262,144 bytes; server configuration can lower or raise it within existing
-validated bounds. The browser keeps its existing bounded history suffix and
-visible omission notice. This is not persistent or date-anchored memory.
+`POST /api/chat` accepts a message, optional safe conversation ID, optional IANA timezone, up to 100 timestamped history messages, and optional stable turn/attempt keys. Input/body limits come from the shared schemas/configuration. Server copies win when supplied history conflicts. Missing timezone uses `DEFAULT_TIMEZONE`.
 
-Both `createModelProvider(config)` and `createTavilySearch(config)` must construct
-successfully before execution, including for no-search questions. Unsupported
-model selection or missing Tavily configuration returns HTTP 503
-`CHAT_NOT_CONFIGURED`, without spending model tokens or making search requests.
-This is local configuration validation, **not** verification of credentials or
-quota with either provider. Credential-free startup remains possible under the
-existing rules; explicitly selecting Azure with missing required fields still
-fails environment validation at startup. Keys remain on the server.
+Provider factories must be configured before a turn is stored, even for a no-search answer. Unsupported selection or missing Tavily configuration returns HTTP 503 `CHAT_NOT_CONFIGURED` without provider requests. Explicit Azure selection with incomplete required fields fails startup validation. Otherwise, credential-free startup and conversation routes are supported.
 
-Input errors retain existing JSON envelopes and HTTP 400/413/415. A deadline
-before SSE headers produces HTTP 504. Unexpected pre-stream errors use sanitized
-HTTP 500. These responses use `{ error: { code, message, details? }, requestId,
-conversationId? }`. Health indicates server availability, not provider readiness.
+`GET /health` returns liveness, application identity/version, timestamp, and `chatConfigured`. That boolean checks required configuration presence; it does not authenticate with providers, prove quota, or certify storage health. Input errors use JSON envelopes and HTTP 400/413/415; a deadline before streaming produces 504. Unexpected failures are sanitized.
 
-## Events and schemas
+## Stream lifecycle
 
-Authoritative runtime schemas and TypeScript types are in `src/contracts.ts`.
-HTTP 200 uses `Content-Type: text/event-stream; charset=utf-8`,
-`Cache-Control: no-cache, no-transform, no-store`, `X-Content-Type-Options: nosniff` and a
-server-generated UUID in `X-Request-Id`. The version is independent of app version.
+HTTP 200 uses `text/event-stream`, no-store/no-transform cache controls, nosniff, and a server-generated request ID. The protocol version is independent of the application version.
 
-| Event | Payload | Cardinality |
-| --- | --- | --- |
-| `meta` | `{ version: "recall.chat.v1", requestId, conversationId, answerMode: "final" }` | First, once |
-| `progress` | `{ phase: "accepted" }`, `{ phase: "model_started", call }`, or `{ phase: "search_started", attempt }` | Accepted once, then real admitted calls only |
-| `result` | `{ message: { id, role: "assistant", content, timestamp }, coverage, issues, sources, evidenceCheck: "citation_ids_only" }` | At most once |
-| `error` | `{ code, message }` | At most once, mutually exclusive with result |
-| `done` | `{ outcome: "completed" | "partial", messageId }` or `{ outcome: "failed" | "cancelled" }` | Sole terminal event, once |
+| Event | Meaning |
+| --- | --- |
+| `meta` | First frame: version, requestId, conversationId and `answerMode: final` |
+| `progress` | accepted, model_started with call, search_started or research_started with attempt; schema-bounded counters |
+| `delta` | Provisional visible text; never an accepted assistant message by itself |
+| `result` | Validated assistant message, coverage/issues, current source metadata, `evidenceCheck: citation_ids_only`; optional memory/generation provenance |
+| `error` | Fixed sanitized failure code/message; mutually exclusive with result |
+| `done` | Sole terminal frame: completed/partial with message ID, or failed/cancelled |
 
-Success order: `meta → accepted → progress* → result → done`.
-Failure order: `meta → accepted → progress* → error → done`.
-There are no progress events after result/error and no events after done. A
-disconnected peer may receive no terminal event; exactly-once ownership cannot
-guarantee delivery. The result and done frames are validated/serialized before
-either is written, and sent together without an asynchronous gap.
+Success is `meta -> accepted -> (progress/delta)* -> result -> done`. Failure replaces result with error. No frames follow done. The reader requires valid terminal framing and clean EOF before treating delivery as successful. A disconnected peer may receive no terminal frame; server ownership does not guarantee network delivery.
 
-Model calls count upward from 1 to at most 3. Search attempts count upward from
-1 to at most 8; duplicates and budget/cutoff rejections do not emit search progress.
-Progress reports admitted adapter calls, not successful retrieval or verified facts.
-No simulated percentages, token events, replay IDs, heartbeats or retries exist.
+The final result replaces drafts. Ordinary non-recall requests may stream as the provider generates text. Historical recall/comparison suppresses unvalidated prose and internal comparison JSON; validated text can then arrive through delta. Raw provider first-token latency and first visible delta latency are therefore different measurements.
 
-Message and conversation IDs use `[a-zA-Z0-9_-]+`, maximum 128 characters.
-The assistant message timestamp is the server's observed UTC completion time;
-content is nonblank and at most 16,000 characters. `coverage` is `complete` with
-no issues or `partial` with at least one issue. It describes execution limitations,
-not item-by-item factual coverage or correctness.
+Coverage is complete when execution issues are empty, otherwise partial. It describes research execution, not universal factual accuracy or complete product coverage. Search issues are limited to the shared schema's budget/cutoff/unavailable/timeout/failure/invalid-result categories. Model/search counters remain inside the three-call and 5+3 search bounds.
 
-Issues are unique members of `search_budget_exhausted`, `search_cutoff`,
-`search_unavailable`, `search_timeout`, `search_failed`, `search_invalid_results`.
-At most 24 sources are sent. Each source is `{ id, query, title, url, retrieved_at,
-published_at?, effective_at? }`: unique `S[1-9][0-9]*` ID (up to 128 characters),
-query/title up to 500 characters, URL up to 2,048 characters. URLs must be absolute
-HTTP(S) with no embedded credentials. Retrieval dates are ISO timestamps with
-offsets; optional evidence dates are valid ISO dates or timestamps. Missing dates
-stay absent. No effective date is inferred. Raw source text stays in the core's
-registry, exactly as truncated for model input; it is not duplicated in the browser.
+## Sources and rendering
 
-Citation markers `[S1]`, etc., including bracket-escaped forms `\[S1\]`,
-`\[S1]` and `[S1\]`, must resolve within this answer's source registry.
-Core, result-schema and browser validation apply the same marker grammar, even
-inside literal code spans. Unknown escaped IDs fail as `INVALID_CITATION` in the
-core; this tightens validation without changing event shapes or the version.
-Registered markers outside code spans become links. **Citation ID checks do not verify quotations
-or factual claims.** Retrieved text and history remain untrusted data. The UI uses
-text nodes and explicit links, never raw HTML or a Markdown library. Its small
-inline formatter protects same-line matching backtick runs first and preserves
-their contents exactly. Paired standalone `**`/`__` delimiters, including paired
-escaped bold delimiters, render as bold. Isolated escapes remain literal; there
-is no general Markdown, block-code or mathematical typesetting implementation. Historical
-assistant text is context, not independently established evidence of a baseline.
+Each result has at most 24 registered current sources, with query/title/URL/retrieval time and optional known publication/effective dates. Missing dates stay absent. SSE sends source metadata, not its full evidence text. Current markers such as `[S1]`, including recognized escaped forms, must resolve to this result's registry. Historical source markers are projected with their original scope and never promoted to current citations.
 
-## Framing, limits and browser acceptance
+The client renders text and vetted links without executing model HTML. Its bounded inline formatter preserves code, literal escapes and reader state. Matching citation IDs does not prove claim support. Constrained quote/comparison checks are described in answer text; `evidenceCheck: citation_ids_only` must not be interpreted as universal factual certification. See [verification.md](verification.md).
 
-The server emits `event: <name>\ndata: <JSON>\n\n` using `JSON.stringify`; embedded
-newlines remain JSON escapes. Each frame is bounded to 1 MiB and the entire stream
-to 2 MiB. Objects are strict: unknown properties, event names and versions fail.
+## Persistence, receipts and retries
 
-The POST fetch reader incrementally decodes fatal UTF-8 across arbitrary byte
-boundaries. It accepts LF, CRLF and CR, joins multiple `data:` lines with newline,
-dispatches on blank lines, and ignores comments before completion. Unsupported SSE
-fields and repeated event fields fail. EOF with unfinished framing, malformed
-JSON, invalid UTF-8, invalid payloads/order, duplicate completion, mismatched IDs,
-overflow or absent completion produces a protocol error. No automatic reconnect.
+The user turn is durable before model work. A generated result is saved before SSE completion. Complete browser delivery and authoritative identity synchronization are followed by an exact message receipt. Pending/partial/failed assistants do not silently enter accepted history. Reopening can recover a saved awaiting-receipt answer; an idempotent retry can replay it without new model calls. Network failure alone does not prove whether a user turn was saved. A known configuration rejection happens before its new turn is stored and is labeled accordingly.
 
-HTTP 200 alone is not success. The browser requires matching result/done **and
-clean EOF** before displaying an accepted answer. A body read failure, cancellation
-or 30-second transport watchdog prevents acceptance even after result/done bytes
-arrived. The watchdog does not extend server execution. Pending readers are
-cancelled and locks, signal listeners and watchdog timers are cleaned up.
-
-Only `done(completed)` answers enter later request history, once, using original
-server message ID/text/timestamp. Research-partial answers remain visible with
-limitations and Sources, but do not enter later history. Progress, placeholders,
-errors and disconnected/cancelled/malformed answers never become assistant history.
-
-## Execution, cancellation and failures
-
-The existing core remains the sole budget owner: 3 model calls, 2 research rounds,
-5+3 search attempts, concurrency 2, 4-second search timeout, 10-second model
-timeout, 15-second search admission cutoff, and at most 25 seconds overall.
-Request arrival time and `request.executionSignal` are propagated, not restarted
-after parsing. Existing token/context limits and deterministic IDs are unchanged.
-
-After Fastify hijack, `SseResponse` owns raw headers/writes/completion. Actual
-socket close, request abort or premature response close cancels work. Normal POST
-body completion is not a disconnect. Writes never target an ended/destroyed
-response. Drain waits stop on cancellation; a blocked socket is destroyed at the
-deadline. Otherwise timeout sends a sanitized error/done best effort. Late work
-and promise rejections are observed and cannot send a second response. A provider
-ignoring cancellation cannot be forcibly stopped, but its late output is discarded.
-
-Public SSE errors are `REQUEST_TIMEOUT`, `MODEL_TIMEOUT`, `MODEL_FAILED`,
-`INVALID_MODEL_OUTPUT`, `INVALID_CITATION`, `CONTEXT_LIMIT`, `AGENT_LIMIT`,
-`CANCELLED`, `INTERNAL_ERROR`, with fixed safe messages. Azure authentication,
-quota/rate limits, incompatible deployments and other upstream HTTP errors all
-map to `MODEL_FAILED`: the existing adapter/core do not preserve a finer category.
-Never infer a specific cause or expose upstream bodies/URLs/keys. Tavily failures
-become explicit core research issues; synthesis may return a partial answer before
-the deadline. No fallback answer is invented after a hard timeout.
-
-## Offline verification
-
-`tests/sse.test.ts` covers framing/schema parity, Unicode, truncation, limits,
-watchdog and writer backpressure. `tests/chat-stream.test.ts` exercises Fastify,
-the unchanged core and real adapters with mocked fetch, including loopback socket
-disconnect. `tests/ui.test.ts` covers rendering, history policy and existing
-interactions. Existing adapter, agent and safeguard regressions remain required.
-
-```powershell
-npm.cmd run typecheck
-npm.cmd test
-git diff --check
-git status --short --branch
-```
-
-All automated provider calls use fixtures. Live compatibility and latency require
-a separately authorized smoke test with verified available free quota. This stage
-does not claim the full live-search/token-streaming acceptance gate is complete.
-
-Memory HTTP integration now persists chat attempts and evidence before result delivery.
-Optional turn keys, identity headers, explicit receipts and provider-free recovery
-are documented in [memory.md](memory.md#milestone-3-http-integration). The five
-SSE payload shapes remain unchanged. Error notices say no answer was accepted,
-which does not deny that an unaccepted generated snapshot may exist on disk.
-
-
-The browser now sends the optional turn keys, remembers only the canonical
-conversation ID, restores server messages and sources, and explicitly acknowledges
-complete SSE results after clean EOF. Pending recovery uses memory HTTP endpoints,
-not chat. Receipt failures and research-partial answers are excluded from trusted
-assistant history. See [browser memory behavior](memory.md#milestone-4-browser-integration).
-
-After valid result/done and clean EOF, the browser renders the answer immediately
-with pending synchronization/receipt status. Conversation synchronization and the
-receipt request continue afterward; only a matching accepted receipt promotes the
-assistant into history. Failed receipts retain the visible answer and recovery
-action. Navigation guards prevent stale callbacks from changing another view.
-Cancellation during synchronization still prevents acceptance. No SSE event or
-public result schema changes are involved.
-
-Constrained quotation/change checks now run before final result delivery; see
-[verification limits](verification.md). The transport evidenceCheck field and all
-event schemas remain unchanged; they do not certify general factual correctness.
+See [memory.md](memory.md) for identities, queueing, local access and storage limits. `chat-stream.test.ts`, `sse.test.ts`, `ui-memory.test.ts`, `ui-retry.test.ts` and `production-correctness.test.ts` exercise framing, cancellation, draft suppression, receipts, malformed output and replay. Live/DOM/manual-browser verification are distinguished in [evaluation.md](evaluation.md).

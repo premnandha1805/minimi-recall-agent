@@ -1,6 +1,8 @@
 node_modules/
 dist/
 coverage/
+# Local design exports; the maintained application is public/.
+/frontend/
 .recall-data/
 .data/
 *.tsbuildinfo

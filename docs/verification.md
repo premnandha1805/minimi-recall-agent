@@ -150,5 +150,41 @@ and these rules reduce unsupported claims but cannot prove general factual accur
 `tests/verification.test.ts` uses frozen labeled/prose evidence and mocked providers.
 It covers all four verdicts, source identity collisions, dates, conflicts, altered
 quotations, unsupported data and injection boundaries. Existing agent/search/SSE
-cancellation, timeout and budget regressions remain required. Real Azure/Tavily
-compatibility, latency and live comparison quality remain unverified.
+cancellation, timeout and budget regressions remain required. Dated live Azure/Tavily and comparison observations are recorded in evaluation.md and docs/results; they are not general accuracy guarantees.
+
+## Recall reliability review
+
+This is the uncommitted 22 November 2026 follow-up to cleanup, not a new historical feature milestone. [The measured results](results/recall-reliability.json) record the predefined before/after runs. No original harness criterion, fixture, source-trust rule, dependency, model-call limit, deadline or search budget was changed.
+
+### Evidence and diagnosis
+
+The harness creates a fact conversation, acknowledges its answer, and asks a recall question in a different conversation. Each traced recall input contained one matching original user statement, its separately labeled assistant response, UTC timestamps, conversation/message/turn identities, and original-time hints. No record was omitted; the user facts fit within the 600-character projection. Assistant projections are capped at 180 characters and are not evidence of personal decisions. All four facts in these runs were sent on 22 November, with Asia/Kolkata timezone. The meeting's yearless 23 August is an event mention, not its message date or proof of an upcoming meeting.
+
+The actual model input is three messages: the trusted system instructions, JSON untrustedHistoricalData, and the recall question. Recall exposes no tools. Exact synthetic inputs, raw responses, selected IDs/quotes and final answers are retained locally in `.data/recall-reliability/live-before.json` and `live-after.json`; no real archive, headers or configuration is traced.
+
+| Case / question pattern | Required facts and source | Traced baseline | Post-fix observation |
+| --- | --- | --- | --- |
+| What meeting did I tell you about? | User: Infosys meeting on 23 August | RECOVERED: exact quotation but model copied record.turnId into messageId. It was not a fabricated UUID; it was the wrong identity field. The old lexical check also rejected harmless "told" framing | PASS: correct user.id, grounded answer with company/date |
+| Which database did I select for CedarLedger-tag? | User selected PostgreSQL for the named project | PASS: user.id and whole source sentence selected; project/database retained | PASS: same complete relationship |
+| Which laptop brand did I buy for FieldKit-tag? | User purchased a Dell notebook for that project | FAIL: input and selected whole quotation contained the identifier, but answer was only "Dell". Token inclusion checked support, not completeness | RECOVERED: raw answer now included both facts, but "bought" was absent from the source's factual wording ("purchased"). References/quotes were valid; conservative grounding rejected the paraphrase and returned full originals |
+| Who did I ask to review the deployment checklist for CedarRelease-tag? | User asked Priya to review that task for the named project | PASS: correct user.id and complete person/task/project relationship | PASS: same complete relationship |
+
+None of these new runs had provider failures, timeouts, missing facts, truncated user evidence, incorrect question/answer pairing or additional search calls. Each used eight model calls: one fact acknowledgment and one recall call per pair. The post-fix four answers contain all required facts, with one explicitly labeled recovery. Receipt/restart verification passed in both runs.
+
+The older cleanup result was 1 PASS / 2 RECOVERED / 1 FAIL; the earlier recovery snapshot was 2 PASS / 2 RECOVERED. Their per-case raw provider responses were not recorded, so the exact reasons for those historical recovered responses cannot be reconstructed. A separate earlier synthetic probe captured prose before otherwise valid JSON and correctly fell back. That observation cannot be assigned to a different historical request without evidence. Provider variability remains a limit of these small samples.
+
+### Correction and alternatives
+
+Prompt-only instructions cannot enforce completeness. Instead, named query locators and compound identifiers must remain in the answer and in selected supporting user evidence. Named entities in the same answer clause must be supported alongside that locator; merely taking words from different conversations does not establish their relationship. Matching is case-insensitive so lowercasing an answer cannot bypass that check. Existing date, ambiguity, negation, quotation and role checks remain in force. Incomplete synthesis recovers to full labeled originals; model-selected excerpts cannot conceal omitted associations.
+
+The compact prompt now specifies copying records[].user.id or assistant.id and preserving requested relationships. It is 446 bytes against the cleanup prompt's 452, with original context-budget tests unchanged. "Told" is accepted as nonfactual narrative framing; evidence IDs, factual tokens and relationship checks are not relaxed. Internal decision categories make deterministic rejection reproducible without putting conversation text into operational logs or changing the public API.
+
+Rejected alternatives: accepting turn IDs as message IDs would weaken identity checks; changing the benchmark would hide the failure; accepting arbitrary prose/JSON mixtures or unrestricted paraphrases would weaken grounding. Extra LLM judges/retries add cost and latency. Provider-specific structured-output changes were unnecessary for the confirmed association defect and would expand the adapter contract. Safe deterministic recovery remains legitimate behavior.
+
+### Verification and remaining limits
+
+`tests/recall-associations.test.ts` covers missing identifiers, correct complete answers, repeated entities, cross-conversation swaps, lowercase answers, original Q&A roles, date-specific retrieval, incomplete excerpts, unknown identifiers, ambiguity, turn/message identity confusion, conservative paraphrase recovery, and one-call/zero-search recovery. Seven initial generalized tests failed before the correction. Original tests and strict live evaluator criteria remain unchanged.
+
+The final predefined live run was 3 PASS / 1 RECOVERED / 0 FAIL, exit 1. Its four saved responses replay identically through the final validator after the lowercase-association hardening; no additional provider run was made. A correct recovered answer is not relabeled as model synthesis. This supports functional correctness of the tested cases, not a four-of-four model-synthesis claim or general semantic accuracy.
+
+The guard recognizes English capitalized names and compound identifiers; it is not arbitrary semantic relationship extraction. Correct paraphrases can still recover, and larger evidence sets may require a narrower query rather than truncated quotations. Local microbenchmark timings and the small live samples in the result file are observations, not a controlled performance improvement claim. Current research/comparison production paths were not changed; frozen mixed-comparison and search regressions remain the relevant checks.

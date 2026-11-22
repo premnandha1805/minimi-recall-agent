@@ -1,100 +1,62 @@
-# Offline application evaluation
+# Verification and evaluation
 
-Run `npm.cmd run eval:offline` from the repository root. This uses installed
-dependencies only and writes `docs/evaluation-results.json`. Ordinary `npm.cmd test`
-also runs the assertions but does not overwrite that report. No credentials or
-network access are required: the injected transport rejects unexpected destinations.
-Frozen synthetic prices are not claims about actual vendors or plans.
+## Commands and provenance
 
-The 29 HTTP cases exercise real Fastify admission, restarted JSON storage,
-historical/date retrieval, Azure response parsing, agent/tool orchestration, Tavily
-parsing, verification, SSE encoding and browser stream validation. F2/F3 exercise
-the actual agent cancellation/deadline machinery with a virtual clock instead of
-HTTP sockets. F4 recovers an awaiting-receipt result without additional provider
-calls. This suite does not run a browser or real socket-disconnect experiment;
-existing HTTP/UI regressions supply separate coverage.
-
-Model outputs are scripted at the provider boundary. Recall output is copied only
-when the real context contains the stored answer; it is not an LLM recall score.
-Injection fixtures exercise data transport with a cooperative scripted model, not
-proof of resistance to an adversarial live model. Relative dates use a frozen
-17 November 2026 reference and explicit zones, including a UTC/local-day boundary.
-Setup occurs outside the timed interval. Random storage identities do not affect
-assertions; report identities and timings may differ between runs.
-
-## Gate 7D verification update
-
-The offline evaluation suite contains 31 frozen cases. Following Gate 7D's
-bounded natural-language pricing and feature verification, cases C6 (prose price
-increase) and C7 (prose price unchanged) now pass both safety and usefulness
-expectations. The recorded Gate 7D run has **31/31 structural/safety passes (100%)**
-and **30/31 usefulness passes (96.8%)**, with 48 scripted model requests and 19 searches.
-Only one restrictive abstention remains: C8 (fictional Acme domain outside the
-explicit official product whitelist).
-The full regression suite passed **687 tests with one skip** across 22 files;
-server/browser typechecks passed.
-
-## Gate 7A regression update (prior)
-
-The suite now contains 31 frozen cases. G7A1–G7A3 use the exact three challenge
-questions through restarted storage and HTTP orchestration. They assert the
-selected original discussion, historical date, complete five-product shortlist,
-and comparison routing before scripted current research. Their expected Cannot
-verify reflects deliberately unsupported comparison evidence, not failed recall.
-The existing evidence grammar and three known usefulness failures are unchanged.
-The recorded Gate 7A run has 31/31 structural/safety passes and 28/31 usefulness
-passes, with 48 scripted model requests and 19 searches. C6, C7 and C8 remain
-the usefulness failures. The full regression run passed 617 tests with one skip
-across 22 files; server/browser typechecks passed. Following the final stop-word
-concatenation cleanup, the 118 affected context/date/verification tests and all
-31 evaluation cases passed again. These remain offline application outcomes,
-not live model accuracy or latency measurements.
-
-## Previous 28-case observed run (before Gate 7A)
-
-| Category | Cases | Structural/safety pass | Usefulness pass |
-| --- | ---: | ---: | ---: |
-| Web/citations | 4 | 4 | 4 |
-| Historical recall | 9 | 9 | 9 |
-| Historical comparisons | 11 | 11 | 8 |
-| Reliability/recovery | 4 | 4 | 4 |
-| Total | 28 | 28 | 25 |
-
-False confirmations: 0 detected. Incorrect historical recalls: 0 detected.
-Accepted fabricated citations or altered quotations: 0. Unnecessary searches in
-the nine recall cases: 0. These counts refer only to explicit frozen assertions;
-they do not establish general factual accuracy or semantic claim support.
-Observed mock calls: 42 model requests and 16 searches across all cases.
-
-Cannot verify occurred in 7/28 cases (25%): 4 appropriate abstentions and 3
-restrictive abstentions relative to the fixture's stated evidence oracle:
-
-| Case | Root cause | Minimum recommended future correction |
+| Command | What it checks | Output / cost |
 | --- | --- | --- |
-| C6 | Complete natural-language price increase is outside the labeled grammar | Add a narrowly validated, lossless natural-language evidence parser with negative fixtures |
-| C7 | Same limitation for equal comparable prices | Reuse that parser without weakening dimensional/quotation checks |
-| C8 | Fictional Acme's explicitly supplied official evidence is outside the whitelist | Add an explicitly reviewed authority policy; never infer authority from the model |
+| `npm run typecheck` | Strict server/scripts/tests TypeScript, unused declarations, and checked browser JS | No API calls |
+| `npm run lint` | Conflict markers and NUL bytes | Small hygiene check, not a security/style analyzer |
+| `npm test` | Unit, Fastify HTTP, DOM, regression and frozen-evaluation assertions | Temporary isolated storage; no providers |
+| `npm run eval:offline` | 31 frozen application cases plus ten existing memory-fixture policy comparisons | `.data/evaluations/evaluation-results.json` and `search-baseline.json`; no providers |
+| `npm run eval:memory` | Ten frozen retrieval/grounding scenarios plus related regressions | `.data/evaluations/memory-evaluation.json`; mocked model |
+| `npm run audit:history` | Every branch's reachable history plus remote/reflog objects; project-local key matching and credential/private-file patterns | `.data/audits/publication.json`; no upload |
+| `npm run smoke:tavily -- --live` | One basic real Tavily query | Consumes configured quota; safe metadata only |
+| `npm run test:live -- --live --runs=1 --research` | Real Azure cross-conversation recall, optional cited research/streaming, receipts and archive reopening after server restart | Own loopback server and new `.data/live-tests/<uuid>/` archive; report in `.data/evaluations/` |
 
-C8's oracle declares `acme.example` authoritative inside the synthetic world;
-production is correct to withhold trust absent such a policy. These quality
-failures remain visible in the report while safety expectations still pass.
-Missing baseline, partial snippet and general recommendation judgments remain
-Cannot verify; the latter has no complete factual oracle in this fixture.
+Live tests do not write the real conversation archive. No keys are copied into test checkouts. Without --live, the live harness exits without making requests. Check quota before opting in. It uses one four-pair recall run by default; --runs accepts 1–10. Research is separately enabled by --research. Previous LIVE_URL-based testing of an arbitrary running archive has been replaced with an owned isolated server.
 
-The top three usefulness risks are strict format dependence, finite authority
-coverage, and inability to adjudicate broad recommendation correctness from these
-rules. No production algorithms were changed to improve evaluation scores.
+## What frozen results mean
 
-Local request wall time over the 26 HTTP cases: median **326.085 ms**, range
-**164.66–437.66 ms**, observed in the currently recorded run. Timings are
-nondeterministic observations, not frozen expectations or performance guarantees.
-This includes disk, mocked parsing and
-in-process HTTP/SSE handling; excludes setup and virtual timeout waits. It is not
-isolated CPU overhead, provider latency, a stable benchmark or live p50/p95.
+The offline evaluation uses real Fastify admission, JSON persistence/restart, history/date selection, provider-response parsing, bounded orchestration, verification, SSE encoding and browser stream validation. The network boundary returns fixed synthetic data. Cancellation/deadline fixtures also use virtual time. Synthetic prices are not current vendor facts.
 
-Verification: server/browser typechecks passed; full offline suite **597 passed,
-1 skipped**, 22 files. The dedicated evaluation passed **28/28** assertions.
-An initial fixture incorrectly expected MODEL_UNAVAILABLE for a provider 503;
-it was corrected to the documented MODEL_FAILED mapping, with no production edit.
-Live accuracy, latency, actual tool-selection quality, a measured always-search
-baseline and clean-clone acceptance remain outside this offline run.
+The recorded recovery evaluation has **31/31 structural/safety checks** and **30/31 usefulness checks**. C8 withholds trust for fictional `acme.example`, which is outside the reviewed official-domain list. This conservative abstention remains visible; safety pass is not advertised as a universal correctness score. A scripted cooperative model in a prompt-injection fixture does not establish resistance to arbitrary live prompt injection.
+
+Memory measurements cover ten frozen scenarios using a mocked model and a synthetic archive. A separate regression exercises 500 committed conversations. Do not describe the ten-scenario P50/P95 as a 500-conversation latency benchmark. Wall times depend on hardware, filesystem, process load and JIT state. No exact-tokenizer claim is made.
+
+The offline baseline now compares the agent against an **always-attempt-search policy** on the ten existing synthetic memory fixtures. Both use the same archive, scripted model, expected conversation IDs, grounding criterion, context, privacy restrictions, and search budgets. The baseline prefetches through the real SearchSession with frozen network results and supplies that session/evidence to the same agent. It is not a dummy counted request discarded before execution.
+
+Observed: both policies grounded 10/10 cases and used nine scripted model calls. The agent made zero search requests. The baseline attempted ten queries; eight reached the mocked provider and two were blocked by unchanged privacy rules. This is a narrow policy ablation, not an end-to-end comparison across all 31 application cases, a live quality study, a latency claim, or proof of general superiority. Real public research still needs search. There is no general live-model factual-accuracy score.
+
+## Live acceptance
+
+The harness distinguishes:
+
+- PASS: complete, validated model-origin recall contains the expected facts and uses another conversation.
+- RECOVERED: the answer contains grounded saved evidence but uses the deterministic fallback; not model PASS.
+- FAIL: missing/incorrect/partial output, protocol or request failure.
+
+It sends browser-style receipts for complete answers, closes its server, reopens the same isolated archive, and checks an accepted answer survived. Optional research requires registered citation markers, sources, and visible SSE deltas. This validates transport/registration, not full semantic claim support. First-token report fields measure the first **visible SSE delta**, which can follow recall validation; they are not upstream provider timings. A nonzero exit must not be reported as an all-model pass.
+
+## Retained snapshots
+
+These files were relocated without changing their contents. Embedded paths describe the original runs, not necessarily today's layout.
+
+| Snapshot | Scope / interpretation |
+| --- | --- |
+| [evaluation-results.json](results/evaluation-results.json), [memory-evaluation.json](results/memory-evaluation.json) | Historical release fixtures and local timings committed before cleanup |
+| [live-e2e-results.json](results/live-e2e-results.json) | Older reported 12/12 recall run, before the stricter model-origin acceptance gate; not directly comparable with the newer gate |
+| [recovery-audit.json](results/recovery-audit.json) | Branch audit, fixes and limitations from recovery commit 63237c0 |
+| [recovery-evaluation-results.json](results/recovery-evaluation-results.json), [recovery-memory-results.json](results/recovery-memory-results.json) | Recovery frozen observations, not current promises |
+| [recovery-live-results.json](results/recovery-live-results.json) | Strict harness: 2 model PASS, 2 RECOVERED; exit 1 |
+| [recovery-http-results.json](results/recovery-http-results.json) | Real cited research/streaming, persistence, receipt and idempotent replay |
+| [recovery-clean-results.json](results/recovery-clean-results.json) | Clean restart/date recall; original price omission retained alongside its passing recheck |
+
+Current cleanup results, including the non-passing live gate, are in [cleanup-verification.json](results/cleanup-verification.json).
+
+The later [recall reliability review](verification.md#recall-reliability-review) and [results](results/recall-reliability.json) preserve both predefined live runs: before 2 PASS / 1 RECOVERED / 1 FAIL; after 3 PASS / 1 RECOVERED / 0 FAIL. The strict harness remains unchanged and exits 1 because recovery is not model-synthesis PASS. All four post-fix answers contain the required facts. Full input/response traces are generated only for the harness's isolated synthetic archive and remain ignored locally; configuration, headers and raw provider errors are never traced.
+
+The earlier repair diaries remain accessible through Git links in [ENGINEERING_JOURNEY.md](ENGINEERING_JOURNEY.md). They are not copied into current operating instructions. The recovery audit recorded 982 passing tests and one Windows symlink-permission skip; newer runs must report their own counts. Browser automation was blocked by the host's URL-policy check in that audit. HTTP/SSE and DOM testing are distinguished from manual visual verification.
+
+## Reproduce a clean environment
+
+Use a fresh checkout or an isolated snapshot of the candidate source, without copying node_modules, .env, private storage, or local design exports. Run `npm ci` (or the required evaluator path `npm install`), typecheck, lint, tests, then `npm run dev`. Confirm health and credential-free conversation routes. Live acceptance requires valid configuration supplied locally; never commit credentials to make a checkout pass.

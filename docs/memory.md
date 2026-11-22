@@ -1,266 +1,35 @@
-# Durable conversation storage — Gate 2, Milestone 1
+# Local memory, retrieval and delivery
 
-`src/memory.ts` now connects to Fastify through `src/memory-http.ts`. The browser now restores server conversations and sends explicit complete-answer
-receipts. Deterministic bounded context retrieval is now connected to chat;
-historical/current factual comparison remains outstanding.
+The application is single-user and single-process. The default archive is `<project>/.data/conversations/`; configured relative paths resolve against the project root. Startup imports the legacy `.recall-data/` archive only when the new default does not exist, retaining originals. Do not share an archive between independent running processes.
 
-## Ownership and schema
+## Stored identities and writes
 
-Open one `ConversationStore` per private directory, once at process startup, and
-close it during shutdown. The default is `.recall-data/`, excluded from Git.
-The directory must not be inside `public/`. IDs are server-generated UUIDs;
-filenames are SHA-256 of the conversation ID, avoiding traversal, Windows reserved
-names and filename case collisions. Input idempotency keys are bounded opaque
-keys, not filenames or message IDs. Never accept a caller-supplied ID generator
-from an HTTP request; the optional generator/clock arguments are test seams.
+`ConversationSchema` in `src/memory.ts` is the canonical `recall.memory.v1` schema. Each conversation has server-owned identity, revision, UTC timestamps, optional timezone, imported seed messages and ordered server turns. Filenames hash validated UUIDs. Client legacy keys map to server identities; they do not become filesystem paths.
 
-Every JSON document has version `recall.memory.v1`, conversation identity,
-revision, UTC creation/update times, optional IANA timezone, seeded messages,
-and ordered turns. Server-recorded turns hold the original user message and
-ordered attempts. A turn's ordinal is stable even if an old failed turn is retried
-after later turns. Completion timestamps never determine logical order.
+Turns retain original user text and stable ordinal order. Attempts progress through running/generated/awaiting-receipt/accepted/partial or terminal failure states. Retry keys are idempotent; later completion time does not reorder an earlier turn. Imported history merges by supplied ID or role/timestamp/content hash. Server copies win on conflicts; imported assistant text is not authoritative historical evidence.
 
-`addTurn` and `startAttempt` return the existing server record for a repeated key,
-including conflicting replay content. Repeated generated results preserve the
-original server snapshot. Seed imports merge by supplied message ID or SHA-256
-of `[role, normalized UTC timestamp, exact content]`; first stored copy wins.
-Restored canonical seed IDs also resolve to the existing seed, including when
-resubmitted content conflicts. Both import and canonical identities preserve the
-original record, order and client_seed provenance across restarts. Distinct
-supplied IDs remain distinct even when their text and timestamps are identical.
-Messages matching known server message IDs cannot replace or promote those records.
-Imports retain supplied order, supplied IDs separately, normalized original UTC
-timestamps, receipt times and `client_seed` provenance. Their canonical IDs are
-server-generated. Imported assistant messages are unverified historical data,
-not accepted server attempts; a later context selector must preserve that distinction.
-Seeded messages are separate from turns because missing turn associations cannot
-be reconstructed honestly. No API history loader is implemented here.
+A per-conversation promise chain serializes changes. A commit queue coordinates the archive snapshot and filesystem writes. Files are size-bounded, written to exclusive same-directory temporary files, flushed and atomically renamed. Production snapshots update after commit. Validated previous revisions support bounded recovery of malformed/empty JSON; damaged originals are retained privately. Unsupported schemas, identity mismatches and unexpected/symlink paths fail closed. These safeguards are not a distributed lock or a guarantee for arbitrary network filesystems.
 
-## Attempt lifecycle
+HTTP storage supports up to 1000 conversations, pages of at most 50, up to 500 turns per conversation and eight attempts per turn, subject to byte/entry/seed limits in `MEMORY_LIMITS`. The standalone store's default capacity is smaller; the HTTP server explicitly supplies its 1000-conversation limit.
 
-`running -> generated -> awaiting_receipt -> accepted | partial`
+## Context and temporal recall
 
-- `saveGenerated` validates the existing ChatResult shape and matching source
-  snapshots, then assigns the stored assistant ID and UTC completion timestamp.
-  The supplied answer ID/time are not authoritative. Return this stored result
-  when HTTP integration is implemented.
-- Each snapshot contains the exact evidence text supplied by the caller (maximum
-  2,000 characters/source), original URL, query and known dates. Snapshot metadata
-  must match the answer registry exactly. The storage layer cannot independently
-  prove what was sent to a model. No text is truncated or invented here.
-- Receipt acknowledgment requires both the correct attempt and stored assistant
-  message ID. A complete answer becomes `accepted`; a research-partial answer
-  becomes `partial`, never accepted history. Repeated acknowledgment is idempotent.
-- Active attempts may become `failed` or `cancelled`. Previously generated data
-  remains available for diagnosis/recovery but does not become accepted history.
-  Late completion cannot overwrite a stopped attempt or another attempt.
-- Only one executing (`running`, `generated`) attempt is allowed per conversation.
-  Earlier turns may await receipt while a later turn executes, preserving legacy
-  chat clients. A turn awaiting receipt must be recovered/replayed, not regenerated.
-  An accepted turn cannot be retried. Failed, cancelled,
-  interrupted and delivered-partial attempts can be retried within the limit.
-- On open, `running` and `generated` become `interrupted`; saved evidence remains.
-  `awaiting_receipt` remains pending; accepted/partial records retain their status.
-  Startup completes recovery before returning a usable store. No pending answer
-  is automatically accepted. Future UI recovery/receipt semantics need integration.
+Every chat retrieves a coherent committed archive view. Intent controls answer mode, not whether archive access occurs. Active conversation context is retained alongside bounded historical matches. When complete history cannot fit, selection uses dates, lexical anchors, modest stemming, majority overlap, inverse-document-frequency scores and contextual neighbors. This is lexical retrieval, not BM25, embeddings or general semantic reasoning.
 
-Source IDs remain scoped to the original assistant answer. Two snapshots can
-both contain `S1` and the same URL with different evidence; they are never merged.
-Citation IDs validate registry membership, not quotation or factual support.
+Messages keep their original UTC timestamps and wording. Relative mentions are interpreted against their original time reference; message dates are distinct from event dates. Historical yearless dates choose the most recent past occurrence, and last Tuesday is strictly before the user's local today. Explicit request timezones win; otherwise `DEFAULT_TIMEZONE` applies. An absent event year never proves that an event is upcoming.
 
-## Frozen bounds and failure behavior
+Retrieved questions, assistant suggestions and hypothetical statements are not user facts. Corrections and competing events remain distinguishable. Matching a keyword or being adjacent does not prove two records describe one event. Context/scan limits are disclosed rather than silently deleting originals. Safe recall may render original quotations when model prose cannot pass grounding; this is labeled recovery.
 
-| Resource | Limit |
-| --- | --- |
-| Conversations | 100 |
-| Serialized conversation | 4 MiB UTF-8 |
-| Total files, including orphan temporary files | 64 MiB |
-| Directory entries, including temporary files | 256 |
-| Turns/conversation | 500 |
-| Attempts/turn | 8 |
-| Seeded messages/conversation | 1,000 |
-| Seed batch | 100 |
-| List page | default 20, maximum 50 |
-| User turn / seeded message | 16,000 / 32,000 characters |
-| Evidence per attempt | 24 sources, 2,000 characters each |
+## HTTP and browser synchronization
 
-Capacity checks include old and new file sizes during replacement. Full storage
-rejects new writes; no original history is silently evicted. Listing is ordered
-by hashed filename with offset pagination and returns metadata only. Directory
-scans and file reads are bounded. Explicit delete is idempotent, but rejects a
-conversation with an active attempt. Corrupt data requires manual recovery:
-load/list/startup/delete refuse it instead of resetting or hiding it.
+Local same-origin/loopback checks protect conversation and chat routes. No client-supplied user ID creates authenticated ownership. Conversation create/list/get routes work without Azure or Tavily configuration.
 
-Read-modify-write operations use per-conversation promise chains. A separate short
-commit chain serializes cross-conversation capacity checks, replacements and deletes.
-Failures release queues. A failed transaction leaves the previous document intact;
-callers receive fixed `MemoryError` codes without paths, content or upstream errors.
-Do not log inputs, snapshots or the raw filesystem error. No storage logging occurs.
+The browser stores only an active conversation ID in localStorage and reopens authoritative server records. A complete streamed result is persisted before delivery. Browser receipt acknowledges the exact conversation/turn/attempt/message identity. Unacknowledged, partial and failed assistants do not silently become accepted factual history. Result recovery and idempotent replay avoid another model call when the answer is already stored.
 
-## Filesystem guarantees and limitations
+The sidebar paginates through the HTTP capacity and preserves the current view on refresh errors. A configuration rejection happens before a new user turn is saved; the UI ends the pending-save state rather than claiming persistence.
 
-Writes create a unique same-directory file with `wx`, write the complete validated
-document, call `FileHandle.sync()`, close it, then `rename` over the destination.
-No copy fallback or destination unlink is used. Windows sharing violations,
-antivirus interference or disk failures produce an error; the old destination is
-retained. Only this operation's temporary path is cleaned up. Orphan temps after
-a crash remain unpromoted and count against capacity; they are never replayed as
-committed history. Manual removal requires separate review.
+## Privacy and verification
 
-Ordinary replacement is exercised on the host filesystem by unit tests. File
-flush plus rename does not establish universal power-loss durability: directory
-metadata flushing, filesystem/network-drive behavior and Windows ACLs differ.
-The guarantee is atomic visible replacement on a supporting local filesystem,
-with preservation on reported pre-rename failure, not a tested power-loss SLA.
-Unix mode requests are 0700/0600; Windows access depends on the user's ACLs.
-Files are plaintext. Retention is until explicit deletion or manual export/removal.
+`.env`, both archives, backups, logs and generated reports are ignored. Operational logs contain request IDs, counts, scores and stages, never conversation excerpts. The local memory diagnostics endpoint is enabled in development and only explicitly in production; it returns private storage metadata/titles, so it must not be exposed publicly. `DEBUG_MEMORY` does not enable raw text logs.
 
-This service assumes one Node process and a trusted local storage directory. It
-rejects duplicate live store owners within that process and symlink/non-file data
-entries, but is not a cross-process lock or a defense against a local attacker
-swapping paths concurrently. Do not share the directory between processes.
-Unknown schema versions, wrong filename/document identity, malformed UTF-8/JSON,
-invalid state transitions and duplicate stored identities fail explicitly.
-
-## Verification and remaining work
-
-`tests/memory.test.ts` uses temporary directories, frozen clocks and offline source
-fixtures. It exercises replacement, failure preservation, recovery, limits,
-idempotency, privacy-safe errors, turn order and concurrency without providers.
-
-The temporal resolver now supplies supported recall anchors during context retrieval.
-Quotation/change verification and true token streaming remain separate outstanding
-requirements. This isolated storage service does not complete Gate 2 or Gate 1's
-live acceptance requirements.
-
-## Milestone 3 HTTP integration
-
-- `POST /api/conversations` with `{}` creates a server-owned conversation.
-- `GET /api/conversations?offset=0&limit=20` lists bounded metadata.
-- `GET /api/conversations/:id` loads the validated document, including provenance,
-  statuses, original messages and answer-scoped evidence snapshots.
-- `DELETE /api/conversations/:id` returns `{deleted}`; pending attempts must be
-  resolved before deletion. Corrupt files are never silently deleted.
-  There is no deletion UI. From local PowerShell, use
-  `Invoke-RestMethod -Method Delete -Uri 'http://127.0.0.1:3000/api/conversations/YOUR-CONVERSATION-UUID'`
-  after replacing the UUID using `GET /api/conversations`. This explicitly deletes
-  that conversation's stored messages and snapshots. Clearing browser data or
-  starting a new conversation does not delete backend files.
-- `GET /api/conversations/:id/turns/:turnId/attempts/:attemptId/result` returns
-  `{status,result}` for awaiting-receipt, accepted or delivered-partial attempts.
-  It does not call providers, accept the answer, or promote interrupted generation.
-- `POST` to the same attempt's `/receipt` with `{messageId}` acknowledges that
-  specific stored answer. A complete result becomes accepted; partial stays partial.
-  Lost receipt replies can safely be retried.
-
-Chat accepts optional `turn: {key, attemptKey}`. Reuse both keys to retransmit a
-submission; use a new attemptKey to retry a failed/cancelled/interrupted attempt.
-The same key preserves original server content. Duplicate completed/pending
-submissions replay their saved SSE result. Running overlap returns HTTP 409.
-Identifiers are returned in `X-Conversation-Id`, `X-Turn-Id`, `X-Attempt-Id` headers;
-SSE payloads remain unchanged. Legacy conversation IDs remain echoed in SSE and
-are persisted as `clientKey` aliases to canonical server UUIDs. Aliases are not
-authentication. Optional alias fields extend stored v1 records; older strict
-readers may reject these records if the application is downgraded.
-
-All configured chats persist user/attempt admission before a provider call.
-Provider preflight remains mandatory. Source snapshots and generated answers are
-saved before awaiting receipt and before emission. Socket writes never imply
-receipt. Cancellation before pending delivery stops the attempt; lost delivery
-after pending delivery remains recoverable. A disk error during finalization may
-leave an interrupted/running record for startup recovery, with a fixed safe log
-notice. No filesystem operation is claimed forcibly cancellable.
-
-Supplied history is merged with disk records and normalized to server originals.
-Known unaccepted assistant answers and later turns are excluded. Seeded history
-remains unverified data. This selects no additional history automatically. Legacy
-clients can continue posting, but do not automatically acknowledge or reuse stored
-pending assistant messages as trusted history; browser receipt integration is next.
-
-The application lazily opens the store and recovers it before first use, closes
-it on shutdown, and keeps write queues released during providers. Storage time
-uses the original request deadline. Private routes require loopback peers, a
-loopback Host matching the listening port, and matching Origin when supplied;
-cross-site fetches are rejected. Same-origin browser/CLI calls are supported;
-there is no public-deployment authentication or CORS access. Private responses
-use no-store, including SSE. Memory routes log a generic path, not message data.
-Storage errors map to sanitized JSON 400/404/409/503/507 before SSE; after hijack
-existing error/done ownership remains unchanged. HTTP memory reads/recovery work
-without model credentials. `BuildServerOptions.memoryDirectory` selects an owned
-private directory for tests or local deployment; default remains `.recall-data/`.
-
-
-## Milestone 4 browser integration
-
-The browser lists bounded stored conversations and loads the active server-owned
-UUID after refresh. Only `recall.activeConversation.v1` (one conversation ID) is
-kept in localStorage; message text, evidence and receipt state are never cached
-there. Earlier conversations are reopened by fetching their current server records.
-The interface discloses local server disk storage. Disabling browser restoration
-only keeps this view in the current session; it does not disable backend writes.
-Unsubmitted messages and failed admissions are not claimed saved, while error
-notices acknowledge that submitted messages may already exist on disk.
-Client-seeded records remain visibly labeled when their original sources are absent.
-Only accepted server answers enter restored assistant history; partial, cancelled,
-interrupted and pending attempts do not. Original logical turn order is retained.
-
-A new conversation is created on the server before its first chat request. Each
-user turn has stable turn/attempt keys; failed completed executions get a fresh
-attempt key for retry, while uncertain network/protocol delivery reuses the key
-for idempotent replay. Server user-message identities and timestamps replace
-local provisional identities before subsequent history submission. Unsynchronized
-provisional user records are not reimported as new server history.
-
-Newly delivered complete answers are acknowledged only after schema/order checks,
-matching terminal delivery and clean SSE EOF. Restored awaiting-receipt answers
-require an explicit Recover / retry receipt action: fetch the saved result,
-validate it and acknowledge its exact message identity. Recovery never submits
-chat. Partial answers are never acknowledged by the browser. Lost acknowledgments
-can be retried; failed receipts stay visibly pending and excluded from history.
-
-Memory HTTP reads are bounded to 5 MiB, have a ten-second transport watchdog,
-validate browser-consumed identities/results and clean up readers/listeners/timers.
-Restoration is cancelled/ignored after newer navigation or destruction. Other-tab
-selection changes show a notice rather than silently replacing the current view;
-server overlap checks remain authoritative. Network, malformed data and deleted
-conversation errors preserve the current view and show an explicit status.
-A Refresh conversations control retries listing without paid calls. This remains
-one local user's server, with no public-deployment authentication.
-
-`tests/ui-memory.test.ts` uses frozen offline HTTP/SSE responses. Existing isolated
-UI suites explicitly disable persistence to retain their layout/interaction test
-boundaries. Real browser geometry, storage restrictions and multiple real browser
-windows still require manual evaluation; DOM tests do not prove those behaviors.
-
-## Historical retrieval and context ? current implementation
-
-The current retrieval design and its audited failure modes are documented in
-[memory-reliability.md](memory-reliability.md). That report supersedes the earlier
-strict all-anchor selector and date-free refusal behavior.
-
-Recall reads a commit-consistent snapshot of this local user's private root,
-waiting for queued writes. Unicode normalization, modest stemming, exact-match
-preference and weighted lexical overlap select bounded original records across
-conversations. Neighboring references, corrections and decisions retain separate
-message IDs, timestamps, roles and conversation identities. Calendar month/year
-ranges augment the existing day/week resolver. Broad recall returns a limited
-selection with an explicit omission notice, rather than falsely reporting no history.
-
-Pure recall disables web_search and uses validated exact excerpts or original
-messages with authoritative metadata. Invalid model evidence falls back to
-originals; it cannot invent a remembered name or decision. Seeded history and
-historical assistant claims are labeled unverified. Named event dates without a
-year stay yearless. More than eight matching records, oversized whole records,
-or unsupported dates produce explicit limitations. Source markers remain
-qualified to their historical answer and never become current search citations.
-
-Current-information requests retain the existing model/search loop, comparison
-checks, receipt semantics, deadline and SSE contract. Full eligible active history
-is still supplied when it fits; long active context uses the existing whole-turn
-fallback. Original data is never pruned by browser history limits or context
-selection. No extra model call, tool, index, database, or dependency was added.
-
-The root directory is the identity boundary: a local single-user instance, not an
-authenticated multi-user service. All browsers on that instance share its memory.
-See the report for separate-root isolation tests, privacy limits and actual measured
-offline results. `npm.cmd run eval:memory` reproduces the dedicated memory evaluation.
+`memory.test.ts`, `memory-http.test.ts`, `memory-review.test.ts`, `context.test.ts`, `dates.test.ts`, `ui-memory.test.ts`, and `live-memory-regression.test.ts` cover concurrent writes, seed conflicts, restart/corruption, long histories, temporal boundaries, receipt recovery and cross-conversation lookup. See [evaluation.md](evaluation.md) for mocked/live distinctions and [ENGINEERING_JOURNEY.md](ENGINEERING_JOURNEY.md) for the actual incident history.
