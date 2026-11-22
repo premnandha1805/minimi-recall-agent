@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import type { Writable } from 'node:stream';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { ZodError } from 'zod';
-import { type AppConfig, loadConfig } from './config.js';
+import { type AppConfig, loadConfig, isChatConfigured } from './config.js';
 import { createExecution, runWithSignal, ExecutionTimeoutError } from './execution.js';
 import { authoritativeHistory, installMemoryHttp } from './memory-http.js';
 import { MemoryError } from './memory.js';
@@ -254,6 +254,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       service: APP_NAME,
       version: APP_VERSION,
       timestamp: new Date().toISOString(),
+      chatConfigured: isChatConfigured(config),
     });
   });
 
@@ -303,7 +304,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       search = options.search ?? createTavilySearch(config, options.fetchImpl);
     } catch {
       return reply.status(503).send(buildErrorResponse('CHAT_NOT_CONFIGURED',
-        'Chat requires a supported Azure model configuration and Tavily credentials.', request.id,
+        'Chat requires Azure model configuration and Tavily credentials. Check the project .env and restart the server; existing process environment variables take precedence.', request.id,
         { conversationId: parsed.data.conversationId }));
     }
     const store = await memory.getStore();

@@ -1136,6 +1136,9 @@ describe('Recall Agent Chat UI (public/index.html + app.js + api.js)', () => {
 
     // composer-dock has pointer-events: none so clicks outside form pass through
     expect(css).toMatch(/\.composer-dock\s*\{[^}]*pointer-events:\s*none;/);
+    expect(css).toMatch(/\.composer-dock\s*\{[^}]*flex-direction:\s*column;/);
+    expect(css).toMatch(/\.composer-dock\s*\{[^}]*align-items:\s*center;/);
+    expect(css).toMatch(/\.memory-status:empty\s*\{[^}]*display:\s*none;/);
   });
 
   it('24. maintains chat input focus after new chat and submission recovery', async () => {

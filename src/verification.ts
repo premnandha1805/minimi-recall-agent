@@ -31,7 +31,8 @@ export function isChangeRequest(query: string): boolean {
 }
 export function isRecallAndVerifyRequest(query: string): boolean {
   return isChangeRequest(query) &&
-    /\b(?:what did (?:i|we) (?:ask|say|discuss)|what was (?:my|your|our) (?:question|answer|recommendation|advice)|remind me what (?:i|we)|what (?:did|had) (?:i|we) (?:asked|said))\b/i.test(query);
+    (/\b(?:what did (?:i|we) (?:ask|say|discuss)|what was (?:my|your|our) (?:question|answer|recommendation|advice)|remind me what (?:i|we)|what (?:did|had) (?:i|we) (?:asked|said))\b/i.test(query) ||
+      /\bwhat (?:was|were)\b[^?!;.]{0,120}\b(?:i|we) (?:discussed|recorded|paid|quoted)\b/i.test(query));
 }
 const Ref = z.strictObject({ sourceId: z.string().regex(/^S[1-9]\d*$/), quote: z.string().min(1).max(500) });
 const HistoricalRef = Ref.extend({ conversationId: z.uuid(), turnId: z.uuid() });

@@ -36,6 +36,7 @@ describe('HTTP server and Chat API foundation', () => {
 
     const body = response.json();
     expect(body.status).toBe('ok');
+    expect(body.chatConfigured).toBe(false);
     expect(body.service).toBe('minimi-recall-agent');
     expect(body.version).toBe('1.0.0');
     expect(typeof body.timestamp).toBe('string');

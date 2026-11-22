@@ -1,0 +1,97 @@
+{
+  "kind": "Synthetic frozen history, mocked model; not live model accuracy",
+  "rows": [
+    {
+      "id": "entities",
+      "expected": 1,
+      "retrieved": 1,
+      "relevant": 1,
+      "retrievalMs": 75.80439999999999,
+      "grounded": true
+    },
+    {
+      "id": "relationships",
+      "expected": 1,
+      "retrieved": 1,
+      "relevant": 1,
+      "retrievalMs": 5.39449999999988,
+      "grounded": true
+    },
+    {
+      "id": "corrections",
+      "expected": 1,
+      "retrieved": 1,
+      "relevant": 1,
+      "retrievalMs": 3.159900000000107,
+      "grounded": true
+    },
+    {
+      "id": "seminar-regression",
+      "expected": 1,
+      "retrieved": 1,
+      "relevant": 1,
+      "retrievalMs": 2.769600000000082,
+      "grounded": true
+    },
+    {
+      "id": "paraphrase",
+      "expected": 1,
+      "retrieved": 1,
+      "relevant": 1,
+      "retrievalMs": 6.089300000000094,
+      "grounded": true
+    },
+    {
+      "id": "last-month",
+      "expected": 1,
+      "retrieved": 1,
+      "relevant": 1,
+      "retrievalMs": 3.828700000000026,
+      "grounded": true
+    },
+    {
+      "id": "multiple-events",
+      "expected": 2,
+      "retrieved": 2,
+      "relevant": 2,
+      "retrievalMs": 2.0475000000001273,
+      "grounded": true
+    },
+    {
+      "id": "yesterday-utc",
+      "expected": 1,
+      "retrieved": 1,
+      "relevant": 1,
+      "retrievalMs": 3.2029999999999745,
+      "grounded": true
+    },
+    {
+      "id": "entity-disambiguation",
+      "expected": 1,
+      "retrieved": 1,
+      "relevant": 1,
+      "retrievalMs": 6.572599999999966,
+      "grounded": true
+    },
+    {
+      "id": "unknown",
+      "expected": 0,
+      "retrieved": 0,
+      "relevant": 0,
+      "retrievalMs": 3.2264000000000124,
+      "grounded": true
+    }
+  ],
+  "summary": {
+    "cases": 10,
+    "expectedConversations": 10,
+    "relevantRetrievedConversations": 10,
+    "unrelatedRetrievedConversations": 0,
+    "groundedCases": 10,
+    "retrievalP50Ms": 3.828700000000026,
+    "retrievalP95Ms": 75.80439999999999,
+    "mockedHttpMs": [
+      252.60500000000002
+    ]
+  }
+}

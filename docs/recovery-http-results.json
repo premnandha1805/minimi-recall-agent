@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-11-22T05:09:23.833Z",
+  "conversationId": "716c7388-278c-42c2-9d12-8b7ea6357275",
+  "rows": [
+    {
+      "name": "configured health",
+      "status": "PASS"
+    },
+    {
+      "name": "list saved conversations",
+      "status": "PASS"
+    },
+    {
+      "name": "create conversation",
+      "status": "PASS"
+    },
+    {
+      "name": "request validation",
+      "status": "PASS"
+    },
+    {
+      "name": "chat HTTP streaming response",
+      "status": "PASS",
+      "statusCode": 200
+    },
+    {
+      "name": "normal live research and citations",
+      "status": "PASS",
+      "coverage": "complete",
+      "sourceCount": 3,
+      "elapsedMs": 4212,
+      "firstProgressMs": 80,
+      "deltas": 24
+    },
+    {
+      "name": "persistence and reopen",
+      "status": "PASS"
+    },
+    {
+      "name": "receipt",
+      "status": "PASS"
+    },
+    {
+      "name": "idempotent retry replays stored result",
+      "status": "PASS"
+    },
+    {
+      "name": "refresh lists new conversation",
+      "status": "PASS"
+    }
+  ]
+}

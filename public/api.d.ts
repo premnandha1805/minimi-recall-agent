@@ -34,6 +34,7 @@ export interface ValidationDetail {
 
 export interface HealthStatusResult {
   ok: boolean;
+  chatConfigured?: boolean;
   service?: string;
   version?: string;
   timestamp?: string;

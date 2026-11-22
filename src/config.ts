@@ -60,10 +60,18 @@ export const EnvSchema = z.object({
 
 export type AppConfig = z.infer<typeof EnvSchema>;
 
+/** Configuration presence only; does not contact providers or claim valid credentials. */
+export function isChatConfigured(config: AppConfig): boolean {
+  return config.MODEL_PROVIDER === 'azure-openai-v1' && Boolean(config.AZURE_OPENAI_API_KEY &&
+    config.AZURE_OPENAI_DEPLOYMENT && config.AZURE_OPENAI_CHAT_ENDPOINT &&
+    config.AZURE_OPENAI_CONTEXT_TOKENS && config.TAVILY_API_KEY);
+}
+
 /**
- * Loads a local .env file into process.env when present without failing on a clean clone.
+ * Loads the project's .env regardless of launching cwd. Existing process variables win.
+ * Explicit paths remain supported; absent files are allowed on a clean clone.
  */
-export function loadEnvIfPresent(envPath = '.env'): void {
+export function loadEnvIfPresent(envPath = resolve(import.meta.dirname, '..', '.env')): void {
   const absolutePath = resolve(envPath);
   if (existsSync(absolutePath)) {
     process.loadEnvFile(absolutePath);

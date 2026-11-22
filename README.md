@@ -10,7 +10,7 @@ The application runs locally on Node.js with TypeScript and Fastify, serving a l
 ## 1. Overview and Minimi Hiring Challenge Alignment
 
 Minimi Recall Agent is engineered to fulfill all core objectives of the Minimi hiring challenge under real-world constraints:
-- **Speed & Latency:** Internal memory lookup executes with **P50 = 1.85 ms, P95 = 37.17 ms**; Fastify streams Server-Sent Events (SSE) immediately upon request receipt; search requests enforce a strict 15s admission cutoff within a 25s total request deadline.
+- **Speed & Latency:** Internal memory lookup executes with **P50 = 3.83 ms, P95 = 75.80 ms**; Fastify streams Server-Sent Events (SSE) immediately upon request receipt; search requests enforce a strict 15s admission cutoff within a 25s total request deadline.
 - **Accuracy & Honesty:** A deterministic verification engine evaluates claims against retrieved web evidence and historical baselines, returning one of four explicit verdicts (*Confirmed change*, *No confirmed change*, *Cannot verify*, *Not comparable*). Verbatim quotes are verified against source text.
 - **Temporal Memory:** Cross-conversation historical recall indexes previous user and assistant turns on disk. Relative dates ("yesterday", "last Tuesday", "3 November") are resolved deterministically against the user's local timezone using `chrono-node`.
 - **₹0 Out-of-Pocket Local Development:** Zero required cloud databases or paid SaaS infrastructure. Engineered to run using standard developer free-tier allocations (Azure OpenAI, OpenAI) and Tavily's free tier, or completely offline with zero credentials and zero token consumption. (Note: live chat turns consume user-configured provider quota according to provider pricing; no billing or credit assumption is made by the repository.)
@@ -33,7 +33,7 @@ Minimi Recall Agent is engineered to fulfill all core objectives of the Minimi h
   - Month and year ranges calculate exact UTC boundary intervals.
 - **Server-Winning JSON Persistence:** Conversations are stored in per-conversation JSON files under `.data/conversations/`. Seeded client histories are merged deterministically; on conflict, server records win.
 - **Write Safety:** Per-conversation promise queues, unique temporary files, and atomic file replacement (`fs.rename`) prevent race conditions or corrupted JSON files.
-- **Hybrid Lexical Retrieval:** Tokenization, stemming, TF-IDF scoring, entity anchor matching, and recency weighting retrieve up to 8 relevant historical snippets (~2,500 tokens) with benchmarked **P50 = 1.85 ms, P95 = 37.17 ms** without vector databases.
+- **Hybrid Lexical Retrieval:** Tokenization, stemming, TF-IDF scoring, entity anchor matching, and recency weighting retrieve up to 8 relevant historical snippets (~2,500 tokens) with benchmarked **P50 = 3.83 ms, P95 = 75.80 ms** without vector databases.
 
 ### 2.3 Change Verification
 - **Four Truthful Verdicts:**
@@ -48,7 +48,7 @@ Minimi Recall Agent is engineered to fulfill all core objectives of the Minimi h
 
 ## 3. Node.js Runtime Requirement
 
-- **Node.js Version:** **Node.js 24 LTS** (verified on `v24.14.1` with `npm 11.21.2`). Compatible with Node.js `v18.0.0+`.
+- **Node.js Version:** **Node.js 24 LTS** (verified on `v24.14.1` with `npm 11.21.2`). Requires Node.js 24 or newer (the runtime uses `process.loadEnvFile` and `import.meta.dirname`).
 - **Operating Systems:** Windows 10/11 (PowerShell), macOS (zsh/bash), and Linux (bash).
 - **TypeScript:** Built with strict TypeScript 5.x / 7.x types, executed directly via `tsx` (no compile step required).
 
@@ -96,7 +96,9 @@ Open **[http://127.0.0.1:3000](http://127.0.0.1:3000)** in your browser. The web
 
 ## 5. Environment Configuration
 
-Copy `.env.example` to `.env`. The configuration file is documented with safe local defaults:
+Keep an existing `.env`; do not overwrite it. For a fresh clone, copy `.env.example` to `.env`, then uncomment and fill all five Azure fields plus `TAVILY_API_KEY`. The example starts the server without live chat. The loader reads the project-root `.env` even from another working directory; existing process variables take precedence. Restart the server after configuration changes. `/health` reports `chatConfigured` as a configuration-presence flag, not a provider connectivity test. Saved conversation routes work without provider keys.
+
+The following is a complete live-configuration example; replace every placeholder and set the actual deployment context window:
 
 ```dotenv
 # Server Settings
@@ -113,12 +115,12 @@ MEMORY_DIRECTORY=.data/conversations
 DEBUG_MEMORY=0
 
 # Model Provider Selection
-# Options: azure-openai-v1 (default live), mock (offline test)
+# Only azure-openai-v1 implements live HTTP chat. Tests inject providers internally.
 MODEL_PROVIDER=azure-openai-v1
 AZURE_OPENAI_CHAT_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com/openai/v1/chat/completions
 AZURE_OPENAI_DEPLOYMENT=YOUR-DEPLOYMENT-NAME
 AZURE_OPENAI_API_KEY=YOUR-AZURE-KEY
-AZURE_OPENAI_CONTEXT_TOKENS=65536
+AZURE_OPENAI_CONTEXT_TOKENS=YOUR-DEPLOYMENT-CONTEXT-WINDOW
 
 # Web Search Provider (Tavily)
 TAVILY_API_KEY=YOUR-TAVILY-KEY
@@ -137,10 +139,10 @@ Minimi Recall Agent is engineered to run at **₹0 out of pocket**:
 
 1. **Azure OpenAI / OpenAI:**
    - Use an Azure OpenAI resource (e.g., student sponsorship, Microsoft for Startups, or free tier credits). Deploy a chat model supporting tool calling (e.g., `gpt-4o` or `gpt-4o-mini`).
-   - Alternatively, standard OpenAI endpoints can be configured using compatible v1 chat completions.
+   - Other provider names are reserved; this submission implements only Azure OpenAI v1.
 2. **Tavily Search API:**
    - Sign up for a free developer account at [tavily.com](https://tavily.com).
-   - Tavily provides 1,000 free search API calls per month with no credit card required.
+   - Check your current account quota before live calls. This project never enables billing or purchases credits.
 3. **Offline Mode (Zero Cost & Zero Credentials):**
    - Reviewers do **not** need live API keys to verify the agent's logic, memory persistence, temporal parsing, or verification engine.
    - Running `npm test`, `npm run eval:offline`, and `npm run eval:memory` executes completely offline against frozen fixtures with mocked providers at ₹0 cost.
@@ -312,9 +314,9 @@ npm run eval:memory
 ### What Each Suite Verifies:
 
 #### Offline & Mocked Verification (Zero External API Calls)
-- `npm test`: Runs Vitest across 33 test files covering Fastify HTTP contracts, SSE framing, memory persistence, write queues, atomic recovery, chrono-node temporal logic, Tavily budget bounds, quote verification, and UI behavior (**973 passed, 1 skipped, 0 failed**).
+- `npm test`: Runs Vitest across 33 test files covering Fastify HTTP contracts, SSE framing, memory persistence, write queues, atomic recovery, chrono-node temporal logic, Tavily budget bounds, quote verification, and UI behavior (**982 passed, 1 skipped, 0 failed**).
 - `npm run eval:offline`: Evaluates 31 frozen search scenarios (`scripts/evaluate-offline.mjs`) testing structural integrity, safety guarantees, prompt-injection defense, and evidence citation compliance without network calls: **31 / 31 passed (100% structural and safety assertions)**, **30 / 31 passed (96.8% usefulness assertions)**, with 1 documented, expected abstention on synthetic untrusted domain `acme.example` in case `C8`.
-- `npm run eval:memory`: Benchmarks memory lookup speed, recall accuracy, and token grounding across 500+ simulated conversations. Measures retrieval latency (**P50 = 1.85 ms, P95 = 37.17 ms**).
+- `npm run eval:memory`: Benchmarks retrieval and grounding on ten frozen recall scenarios with mocked model output; a separate regression covers 500 conversations. Measures retrieval latency (**P50 = 3.83 ms, P95 = 75.80 ms**).
 
 #### Real Provider Verification (Opt-in, Requires Credentials)
 - `npm run test:live`: Live end-to-end integration harness (`scripts/live-e2e.ts`) for opt-in testing with real Azure OpenAI and Tavily credentials. Consumes live model tokens and search queries according to provider plans.
@@ -327,13 +329,13 @@ npm run eval:memory
 To verify that the project installs and runs cleanly on any standard machine:
 
 1. Clone or extract the repository into a completely fresh directory.
-2. Confirm Node.js is installed (`node -v` shows v18+; v24 recommended).
+2. Confirm Node.js is installed (`node -v` shows v24 or newer).
 3. Execute `npm install`. Confirm packages install without postinstall errors or peer dependency conflicts.
 4. Execute `npm run typecheck` &rarr; verifies 0 TypeScript compilation errors across backend and frontend code.
 5. Execute `npm run lint` &rarr; verifies 0 lint errors.
-6. Execute `npm test` &rarr; confirms **973 tests pass** (1 skipped) across 33 test files.
+6. Execute `npm test` &rarr; confirms **982 tests pass** (1 skipped) across 33 test files.
 7. Execute `npm run eval:offline` &rarr; confirms **31 of 31** offline evaluation cases pass.
-8. Execute `npm run dev` &rarr; server starts on `http://127.0.0.1:3000` within ~3 seconds.
+8. Execute `npm run dev` &rarr; server starts on `http://127.0.0.1:3000`.
 
 ---
 
@@ -341,7 +343,7 @@ To verify that the project installs and runs cleanly on any standard machine:
 
 To deliver maximum reliability, speed, and clarity within the hiring challenge timeframe, the following were intentionally excluded:
 - **Single-Process Storage:** Persistent memory uses local JSON files with atomic rename. It is designed for single-node evaluation, not distributed multi-server clusters or NFS mounts.
-- **No Vector Database:** Vector embeddings introduce external dependencies, embedding model latency, high RAM usage, and cloud costs. Deterministic lexical search (BM25/TF-IDF) achieves **P50 = 1.85 ms, P95 = 37.17 ms** retrieval latency with 100% explainability.
+- **No Vector Database:** Vector embeddings introduce external dependencies, embedding model latency, high RAM usage, and cloud costs. Deterministic lexical search (BM25/TF-IDF) achieves **P50 = 3.83 ms, P95 = 75.80 ms** retrieval latency with 100% explainability.
 - **No Docker Requirement:** Designed to run directly via native Node.js without requiring Docker daemons, Linux containers, or virtualization overhead.
 - **Local Loopback Security:** The server binds to `127.0.0.1` by default. There is no multi-tenant authentication, user RBAC, or public Internet hardening. Do not expose this port directly to untrusted public networks without a reverse proxy.
 - **No Multi-Agent Swarms:** Instead of unpredictable multi-agent chat handoffs, Minimi uses a single bounded agent loop with exactly one tool, guaranteeing predictable budget caps and low latency.
@@ -395,16 +397,18 @@ minimi-recall-agent/
 
 | Evaluation Dimension | Measurement / Metric | Result / Status |
 | :--- | :--- | :--- |
-| **Unit & Integration Suite** | 33 test files, Vitest | **973 passed, 1 skipped, 0 failed** |
+| **Unit & Integration Suite** | 33 test files, Vitest | **982 passed, 1 skipped, 0 failed** |
 | **Offline Fixture Evaluation** | 31 frozen test cases (`eval:offline`) | **31 / 31 structural & safety (100%), 30 / 31 usefulness (96.8%)** |
-| **Memory Retrieval Latency** | 500+ simulated conversations (`eval:memory`) | **P50: 1.85 ms, P95: 37.17 ms** |
+| **Memory Retrieval Latency** | 10 frozen recall scenarios (`eval:memory`) | **P50: 3.83 ms, P95: 75.80 ms** |
 | **Memory Recall Grounding** | Grounded recall without hallucinations | **10 / 10 benchmark cases grounded** |
 | **Search Budget Enforcement** | Max 2 rounds, 5+3 query budget, max 8 total | **Strictly enforced across all runs** |
 | **Request Latency Deadline** | Total request timeout 25s, search cutoff 15s | **Zero deadline overruns observed** |
 
 ### Truthful Live Testing Summary
 
-Live verification was executed under controlled conditions with real Azure OpenAI and Tavily APIs:
+Current recovery audit (22 November 2026): real research, citations, streaming, persistence, receipts and retry passed over HTTP. The existing recall harness returned **2/4 model PASS, 2/4 RECOVERED, 0 failed answers** and exited 1 because it requires all answers to be model synthesis. Manual browser verification is blocked by the Computer Use host. See `docs/recovery-audit.json` and the separate recovery result files.
+
+The scenario observations below describe earlier release runs, not a fresh pass on this candidate:
 - **Scenario A (Pure Historical Recall):** **PASSED LIVE.** The model successfully retrieved past conversation details from disk and answered accurately with 0 web search requests.
 - **Scenario B (Shortlist Recall + Fresh Web Research):** **PASSED LIVE (Tool Calling & Search Integration).** Real Azure OpenAI tool calling and Tavily search executed successfully (3 live searches, 8.89s total latency). A historical assistant response omission was identified in the output; the Q&A pairing defect was subsequently corrected and thoroughly verified in offline test suites. In accordance with ₹0 out-of-pocket rules, the corrected version was not re-tested against live APIs.
 - **Scenario C (Five-Product Historical Verification):** **PASSED LIVE (Shortlist Retrieval & Search Integration).** Real live test demonstrated five-product shortlist retrieval (5/5) and real search integration (8 Tavily searches in 12.86s). A duplicate vendor rendering defect and missing Zoho CRM coverage were identified in initial output; the final coverage fix was implemented and verified offline across all regression tests. In accordance with ₹0 out-of-pocket rules, that fix was not live-retested.

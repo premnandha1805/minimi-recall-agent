@@ -257,6 +257,14 @@ textarea:focus-visible,
   color: var(--text-muted);
 }
 
+.session-refresh-btn {
+  width: 100%;
+  min-height: 32px;
+  justify-content: center;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
 .session-item-btn {
   width: 100%;
   text-align: left;
@@ -1281,13 +1289,36 @@ textarea:focus-visible,
   pointer-events: none;
   padding: 12px 24px 20px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
   background: linear-gradient(to top, var(--bg-surface) 72%, rgba(249, 249, 247, 0));
   transition: left 180ms ease;
 }
 
 .app-shell.sidebar-collapsed .composer-dock {
   left: 0;
+}
+
+.memory-status {
+  width: 100%;
+  max-width: var(--column-max-width);
+  pointer-events: auto;
+  margin-bottom: 10px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: var(--shadow-ambient);
+  transition: opacity 140ms ease;
+}
+
+.memory-status:empty {
+  display: none;
 }
 
 .composer-form {

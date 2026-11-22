@@ -42,6 +42,40 @@ async function send(text = 'Original question') {
   await flush(); await flush();
 }
 describe('server-authoritative browser restoration and receipts', () => {
+  it.each([109, 1000])('lists all %s saved conversations across every page and refreshes successfully', async (total) => {
+    const ids = Array.from({ length: total }, (_, n) => `${String(n).padStart(8, '0')}-1111-4111-8111-111111111111`);
+    const { app, fetchImpl } = await mount(async (url) => {
+      const offset = Number(new URL(url, 'http://localhost').searchParams.get('offset'));
+      return json({ total, items: ids.slice(offset, offset + 50).map((id) => ({ id })) });
+    }, false);
+    expect(ids.every((id) => app.getSessions().some((s) => s.id === id))).toBe(true);
+    expect(document.body.textContent).not.toContain('could not be listed');
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).includes('?offset'))).toHaveLength(Math.ceil(total / 50));
+    await app.refreshConversations();
+    expect(app.getSessions().filter((s) => ids.includes(s.id))).toHaveLength(total);
+  });
+  it('rejects empty intermediate pages without looping or discarding the active view', async () => {
+    const { app, fetchImpl } = await mount(async () => json({ total: 109, items: [] }), false);
+    expect(document.body.textContent).toContain('could not be listed');
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).includes('?offset'))).toHaveLength(1);
+    expect(app.getActiveSession().history).toEqual([]);
+  });
+  it('discloses missing chat configuration even when the HTTP server is connected', async () => {
+    const app = createChatApp({ root: document, persistence: false,
+      fetchImpl: async () => json({ status: 'ok', version: '1.0.0', chatConfigured: false }) });
+    apps.push(app); await app.waitForInitialHealth();
+    expect(document.body.textContent).toContain('Chat not configured');
+  });
+  it('ends the pending-save state when chat is rejected before persistence', async () => {
+    await mount(async (url) => url.includes('?offset') ? json({ total: 0, items: [] }) : url === '/api/chat' ?
+      json({ error: { code: 'CHAT_NOT_CONFIGURED', message: 'Chat configuration missing.' } }, 503) :
+      json({ ...conversation(), turns: [] }), false);
+    await send('Please help');
+    expect(document.body.textContent).toContain('Not saved');
+    expect(document.body.textContent).not.toContain('Submission pending');
+    expect(document.body.textContent).toContain('rejected before saving');
+    expect(document.querySelector('[data-action="retry-request"]')).not.toBeNull();
+  });
   it.each([false, true])('Gate 7C keeps visible failed receipts recoverable and ignores navigation (navigate=%s)', async (navigate) => {
     let body: any; let release!: () => void;
     const { app } = await mount(async (url, init) => {

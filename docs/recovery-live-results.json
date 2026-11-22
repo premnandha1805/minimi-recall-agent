@@ -1,0 +1,59 @@
+{
+  "timestamp": "2026-11-22T05:06:29.567Z",
+  "provider": "real configured provider",
+  "runs": 1,
+  "passed": 2,
+  "recovered": 2,
+  "failed": 0,
+  "total": 4,
+  "rows": [
+    {
+      "run": 1,
+      "pair": "meeting",
+      "status": "RECOVERED",
+      "totalMs": 3115,
+      "firstTokenA": 1745,
+      "firstTokenB": 1156,
+      "requestA": "38c404ef-0e29-4c42-a61d-9cb01a8f0930",
+      "requestB": "e9d7086c-296c-49f8-ab09-6f1b1602f224",
+      "origin": "recovered",
+      "fallback": true
+    },
+    {
+      "run": 1,
+      "pair": "project database",
+      "status": "PASS",
+      "totalMs": 2899,
+      "firstTokenA": 1835,
+      "firstTokenB": 918,
+      "requestA": "09727b73-e2c8-4311-a7b4-6c8f8c2e1844",
+      "requestB": "409b71ad-a765-42e7-b07f-a117d1d2d835",
+      "origin": "model",
+      "fallback": false
+    },
+    {
+      "run": 1,
+      "pair": "laptop purchase",
+      "status": "RECOVERED",
+      "totalMs": 2535,
+      "firstTokenA": 1532,
+      "firstTokenB": 795,
+      "requestA": "9fa0fcf3-fbac-4eb2-ab2c-10a894fb21f4",
+      "requestB": "ef7e6818-a719-4b37-a593-fc2ad62e6df6",
+      "origin": "recovered",
+      "fallback": true
+    },
+    {
+      "run": 1,
+      "pair": "person and task",
+      "status": "PASS",
+      "totalMs": 2403,
+      "firstTokenA": 1134,
+      "firstTokenB": 1074,
+      "requestA": "49c6d326-7eec-4c44-a79a-f3b340e9329b",
+      "requestB": "ae53842f-b096-406a-bbea-11b1af5ee047",
+      "origin": "model",
+      "fallback": false
+    }
+  ]
+}

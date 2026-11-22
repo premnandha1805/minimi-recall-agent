@@ -181,7 +181,10 @@ describe('Gate 3 — Scenario 2: Mixed Recall + Verification', () => {
   it('correctly identifies dual recall + verify intent', () => {
     expect(isRecallAndVerifyRequest('What did I ask on 3 November? Is your answer still correct today?')).toBe(true);
     expect(isRecallAndVerifyRequest('What was your recommendation on 3 November and is it still valid?')).toBe(true);
+    expect(isRecallAndVerifyRequest('What was the Neon price we discussed on 3 November, and has it changed today?')).toBe(true);
+    expect(isRecallAndVerifyRequest('What were the prices I recorded earlier, and have they changed?')).toBe(true);
     expect(isRecallAndVerifyRequest('Have our Neon prices changed since Monday?')).toBe(false);
+    expect(isRecallAndVerifyRequest('What is the current Neon price?')).toBe(false);
   });
 
   it('formats combined answer with historical recall and current verification', () => {
@@ -282,7 +285,10 @@ describe('Gate 3 — Scenario 2: Mixed Recall + Verification', () => {
     expect(result.answer).toContain('[S1]');
   });
 
-  it('pairs seeded historical user question and assistant answer, showing both in output with Cannot verify when baseline lacks official evidence', async () => {
+  it.each([
+    'What did I ask on 3 November? Is your answer still correct today?',
+    'What was the Neon price we discussed on 3 November, and has it changed today?',
+  ])('pairs seeded historical Q&A with an untrusted baseline for: %s', async (laterQuery) => {
     const conversationId = '33333333-3333-4333-8333-333333333333';
     const userMsgId = '44444444-4444-4444-8444-444444444444';
     const assistantMsgId = '55555555-5555-4555-8555-555555555555';
@@ -323,7 +329,6 @@ describe('Gate 3 — Scenario 2: Mixed Recall + Verification', () => {
       snapshot: async () => [structuredClone(convo)],
     };
 
-    const laterQuery = 'What did I ask on 3 November? Is your answer still correct today?';
     const retrieved = await retrieveMemory(store, {
       query: laterQuery,
       activeConversationId: '99999999-9999-4999-8999-999999999999',

@@ -166,11 +166,11 @@ For multi-entity verifications (such as five CRM platforms):
 
 ### 7.1 Lexical Memory vs. Vector Database
 - *Decision:* Implemented an in-process lexical index (tokenization, stemming, TF-IDF, entity anchors) instead of a vector database (e.g., Pinecone, Chroma).
-- *Rationale:* Vector embeddings require either local ONNX runtimes (~200MB+ download and high CPU/RAM usage) or third-party embedding API calls (introducing network latency and per-token costs). Lexical search achieves **P50 = 1.85 ms, P95 = 37.17 ms** retrieval latency, requires zero external daemons or vector indices, and provides 100% deterministic, explainable ranking.
+- *Rationale:* Vector embeddings require either local ONNX runtimes (~200MB+ download and high CPU/RAM usage) or third-party embedding API calls (introducing network latency and per-token costs). Lexical search achieves **P50 = 3.83 ms, P95 = 75.80 ms** retrieval latency, requires zero external daemons or vector indices, and provides 100% deterministic, explainable ranking.
 
 ### 7.2 Single-Process Fastify vs. Microservices / Agent Swarms
 - *Decision:* Unified Fastify architecture instead of multi-service microservices or multi-agent swarms.
-- *Rationale:* Microservice boundaries introduce serialization overhead, multiple points of network failure, and complicated deployment steps. A single Fastify server starts in &lt;1 second, consumes &lt;60MB RAM, and fulfills all challenge requirements with extreme code clarity.
+- *Rationale:* Microservice boundaries introduce serialization overhead, multiple points of network failure, and complicated deployment steps. A single Fastify server runs without a build step or additional service. Startup and memory usage depend on the machine; this audit did not measure RSS.
 
 ### 7.3 Plain HTML/CSS/JS vs. React / Next.js
 - *Decision:* Native vanilla ES modules and clean CSS without frontend build tools.
@@ -185,14 +185,14 @@ For multi-entity verifications (such as five CRM platforms):
 ## 8. Measured Evaluation Metrics
 
 ### 8.1 Memory Performance Benchmarks (`npm run eval:memory`)
-Benchmarked across 500+ simulated conversations with realistic turns and historical baselines:
-- **P50 Retrieval Latency:** **1.85 ms**
-- **P95 Retrieval Latency:** **37.17 ms**
-- **Recall Accuracy / Grounding:** **10 / 10 benchmark cases properly grounded** (0 hallucinations, 0 cross-conversation leaks).
+Measured on ten frozen recall scenarios with mocked model output; a separate regression exercises 500 conversations. These timings are local observations, not live-model accuracy or a 500-conversation latency benchmark. See `docs/recovery-memory-results.json`:
+- **P50 Retrieval Latency:** **3.83 ms**
+- **P95 Retrieval Latency:** **75.80 ms**
+- **Recall Accuracy / Grounding:** **10 / 10 synthetic benchmark cases grounded**; this does not measure live-model accuracy.
 
 ### 8.2 Full Automated Regression Suite (`npm test`)
 - **Total Test Files:** 33 files
-- **Total Tests:** **973 passed, 1 skipped, 0 failed**
+- **Total Tests:** **982 passed, 1 skipped, 0 failed**
 - **Coverage:** Fastify HTTP endpoints, SSE framing, atomic file writing, concurrent queue execution, chrono-node edge cases, 5+3 search budgeting, quotation normalization, and DOM UI interactions.
 
 ### 8.3 Scripted Offline Evaluations (`npm run eval:offline`)
@@ -204,7 +204,9 @@ Benchmarked across 500+ simulated conversations with realistic turns and histori
 
 ## 9. Truthful Live Test Reporting
 
-All live tests were executed under strict observation against real Azure OpenAI and Tavily endpoints. In accordance with engineering honesty and ₹0 out-of-pocket principles:
+Current recovery audit (22 November 2026): 982 tests passed, 1 skipped; clean snapshot also passed. Real research streamed in 4.21s with 1 Tavily search and 2 model calls. The existing live recall harness returned 2/4 model PASS and 2/4 RECOVERED, so its strict model-only gate FAILED. Browser verification was blocked by the Computer Use host. See `docs/recovery-audit.json` and the separate `docs/recovery-*-results.json` files.
+
+The scenario observations below describe the earlier release runs, not a fresh pass on this candidate. All those live tests were executed against real Azure OpenAI and Tavily endpoints. In accordance with engineering honesty and ₹0 out-of-pocket principles:
 
 1. **Scenario A (Pure Historical Recall):**
    - **Status:** **PASSED LIVE.**
@@ -218,4 +220,4 @@ All live tests were executed under strict observation against real Azure OpenAI 
    - **Status:** **PASSED LIVE (Shortlist Retrieval & Search Integration).**
    - Successfully demonstrated five-product shortlist retrieval (5/5) and real search integration (8 Tavily searches in 12.86s). Output correctly returned *Cannot verify* due to absence of an authoritative past baseline.
    - *Observation:* The initial candidate formatter rendered duplicate vendor rows and omitted Zoho CRM from the final list.
-   - *Resolution:* The product coverage aggregation in `src/verification.ts` was repaired and verified against the full 973-test offline suite. To preserve quota and maintain ₹0 budget, that fix was **not live-retested**.
+   - *Resolution:* The product coverage aggregation in `src/verification.ts` was repaired and verified against the full 973-test release offline suite. To preserve quota and maintain ₹0 budget, that fix was **not live-retested**.

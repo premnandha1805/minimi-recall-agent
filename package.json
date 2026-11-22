@@ -4,6 +4,9 @@
   "description": "Temporal, evidence-grounded chat agent with fast web search and citation verification",
   "main": "src/index.ts",
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "dev": "tsx watch --ignore ./.data/** --ignore ./.recall-data/** src/index.ts",
     "start": "tsx src/index.ts",

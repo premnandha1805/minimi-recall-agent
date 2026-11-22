@@ -1,0 +1,552 @@
+{
+  "date": "2026-11-22",
+  "base": "3fb014883b663195c2ba862f4fa36304272f14e2",
+  "verdict": "NOT READY FOR MERGE",
+  "reason": "Strict model-only live recall gate returned two recoveries; manual browser verification was blocked by Computer Use URL policy.",
+  "counts": {
+    "localBranches": 23,
+    "remoteTrackingBranches": 1,
+    "remoteAliases": 1,
+    "worktrees": 12,
+    "stashes": 0,
+    "reflogCommitsInspected": 54,
+    "gitBlobsScannedForKnownCredentials": 346,
+    "knownCredentialMatches": 0,
+    "unreachableBlobs": 9
+  },
+  "branches": [
+    {
+      "name": "backup/primary-workspace-20261120",
+      "kind": "local",
+      "latestCommit": "09245b8",
+      "purpose": "Preserved uncommitted UI/layout fixes, diagnostic notes and generated benchmark changes.",
+      "mainOnlyCommits": 5,
+      "branchOnlyCommits": 1,
+      "integration": "Not integrated; one unique commit",
+      "survival": "1000-conversation validation and composer fixes missing from main; recovered selectively.",
+      "missingOrRegressed": "Frontend rejects total >100; composer layout/status observer missing.",
+      "action": "Recover UI hunks only; retain historical diagnostic/results on backup."
+    },
+    {
+      "name": "feat/gate-2-temporal-memory",
+      "kind": "local",
+      "latestCommit": "694c04b",
+      "purpose": "Durable JSON history, dates, server-winning seeds and cross-conversation recall.",
+      "mainOnlyCommits": 14,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "feat/gate-3-change-verification",
+      "kind": "local",
+      "latestCommit": "4e90b26",
+      "purpose": "Four-verdict evidence checks and mixed recall/current verification.",
+      "mainOnlyCommits": 4,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "feature/agent-core",
+      "kind": "local",
+      "latestCommit": "86cf0a3",
+      "purpose": "Bounded agent, Azure v1 adapter and single web_search tool.",
+      "mainOnlyCommits": 43,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "feature/chat-api",
+      "kind": "local",
+      "latestCommit": "8b22394",
+      "purpose": "Validated Fastify HTTP and health foundation.",
+      "mainOnlyCommits": 49,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "feature/chat-ui",
+      "kind": "local",
+      "latestCommit": "14f6460",
+      "purpose": "Plain HTML/CSS/JS chat UI.",
+      "mainOnlyCommits": 47,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "feature/latency-observability",
+      "kind": "local",
+      "latestCommit": "5bc979a",
+      "purpose": "Timing, stable sources, formatting, scroll and retry improvements.",
+      "mainOnlyCommits": 32,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "feature/live-chat-integration",
+      "kind": "local",
+      "latestCommit": "3466bc6",
+      "purpose": "Real model/search orchestration and validated SSE transport.",
+      "mainOnlyCommits": 39,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "feature/project-setup",
+      "kind": "local",
+      "latestCommit": "6901ef3",
+      "purpose": "Pinned TypeScript/Node project setup.",
+      "mainOnlyCommits": 51,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "feature/web-search",
+      "kind": "local",
+      "latestCommit": "32a90bd",
+      "purpose": "Tavily adapter, source registry and enforced search budgets.",
+      "mainOnlyCommits": 41,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "fix/chat-ui-usability",
+      "kind": "local",
+      "latestCommit": "bb6bb07",
+      "purpose": "Chat scrolling and composer focus.",
+      "mainOnlyCommits": 45,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "fix/five-crm-coverage",
+      "kind": "local",
+      "latestCommit": "73ccb78",
+      "purpose": "Vendor grouping and complete five-product coverage.",
+      "mainOnlyCommits": 1,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "fix/historical-qa-pairing",
+      "kind": "local",
+      "latestCommit": "9eae1b0",
+      "purpose": "Pair historical questions with their recorded assistant responses.",
+      "mainOnlyCommits": 2,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "fix/live-memory-recall",
+      "kind": "local",
+      "latestCommit": "980371b",
+      "purpose": "Stronger historical grounding and reliable recall.",
+      "mainOnlyCommits": 5,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "fix/live-tool-call-schema",
+      "kind": "local",
+      "latestCommit": "56e96e5",
+      "purpose": "Normalize web_search argument shape and preserve fallback.",
+      "mainOnlyCommits": 3,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "fix/main-regression-recovery",
+      "kind": "local",
+      "latestCommit": "3fb0148",
+      "purpose": "Current local recovery candidate; no merge or push.",
+      "mainOnlyCommits": 0,
+      "branchOnlyCommits": 0,
+      "integration": "Recovery branch under review",
+      "survival": "Candidate changes not integrated.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep separate; resolve remaining QA gates before merge approval."
+    },
+    {
+      "name": "main",
+      "kind": "local",
+      "latestCommit": "3fb0148",
+      "purpose": "Published release base.",
+      "mainOnlyCommits": 0,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "release/final-submission",
+      "kind": "local",
+      "latestCommit": "3fb0148",
+      "purpose": "Submission documentation and historical evaluation evidence.",
+      "mainOnlyCommits": 0,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "swarm-agent-worker-2c834fba",
+      "kind": "local",
+      "latestCommit": "6cfc071",
+      "purpose": "Reliability base plus uncommitted agent experiment.",
+      "mainOnlyCommits": 6,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "swarm-context-worker-8a224c2b",
+      "kind": "local",
+      "latestCommit": "6cfc071",
+      "purpose": "Reliability base plus uncommitted context experiment.",
+      "mainOnlyCommits": 6,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "swarm-recall-worker-8bc787cd",
+      "kind": "local",
+      "latestCommit": "6cfc071",
+      "purpose": "Reliability base plus uncommitted recall experiment.",
+      "mainOnlyCommits": 6,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "swarm-tests-worker-232f9019",
+      "kind": "local",
+      "latestCommit": "6cfc071",
+      "purpose": "Reliability base plus uncommitted UI/test work.",
+      "mainOnlyCommits": 6,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "test/final-live-e2e-validation",
+      "kind": "local",
+      "latestCommit": "73ccb78",
+      "purpose": "Five-product coverage base plus untracked live harness work.",
+      "mainOnlyCommits": 1,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "origin/HEAD",
+      "kind": "remote alias",
+      "latestCommit": "3fb0148",
+      "purpose": "Remote release reference.",
+      "mainOnlyCommits": 0,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    },
+    {
+      "name": "origin/main",
+      "kind": "remote-tracking",
+      "latestCommit": "3fb0148",
+      "purpose": "Remote release reference.",
+      "mainOnlyCommits": 0,
+      "branchOnlyCommits": 0,
+      "integration": "Ancestor or identical to main",
+      "survival": "Committed implementation retained or superseded by newer compatible code; tested in full suite.",
+      "missingOrRegressed": "No omitted compatible committed fix identified.",
+      "action": "Keep branch and worktree unchanged; do not remerge older code."
+    }
+  ],
+  "components": [
+    {
+      "file": "src/config.ts",
+      "lastMainChange": "63c353a fix: stream one-call recall with bounded retry and grounded recovery"
+    },
+    {
+      "file": "src/model.ts",
+      "lastMainChange": "6cfc071 fix: harden live recall and production reliability"
+    },
+    {
+      "file": "src/streaming-model.ts",
+      "lastMainChange": "6cfc071 fix: harden live recall and production reliability"
+    },
+    {
+      "file": "src/search.ts",
+      "lastMainChange": "56e96e5 fix(agent): normalize web search tool calls and preserve recall fallback"
+    },
+    {
+      "file": "src/agent.ts",
+      "lastMainChange": "56e96e5 fix(agent): normalize web search tool calls and preserve recall fallback"
+    },
+    {
+      "file": "src/server.ts",
+      "lastMainChange": "6cfc071 fix: harden live recall and production reliability"
+    },
+    {
+      "file": "src/memory.ts",
+      "lastMainChange": "6cfc071 fix: harden live recall and production reliability"
+    },
+    {
+      "file": "src/memory-http.ts",
+      "lastMainChange": "504f2c9 fix: retrieve committed archive on every chat and recover memory files"
+    },
+    {
+      "file": "src/context.ts",
+      "lastMainChange": "9eae1b0 fix(memory): pair historical questions with recorded assistant replies"
+    },
+    {
+      "file": "src/dates.ts",
+      "lastMainChange": "504f2c9 fix: retrieve committed archive on every chat and recover memory files"
+    },
+    {
+      "file": "src/verification.ts",
+      "lastMainChange": "73ccb78 fix(verification): preserve five-product shortlist coverage"
+    },
+    {
+      "file": "public/api.js",
+      "lastMainChange": "6cfc071 fix: harden live recall and production reliability"
+    },
+    {
+      "file": "public/app.js",
+      "lastMainChange": "6cfc071 fix: harden live recall and production reliability"
+    }
+  ],
+  "rootCauses": [
+    {
+      "confirmed": true,
+      "problem": "Stored conversations could not be listed",
+      "cause": "GET returned HTTP 200 with 109 conversations; frontend rejected totals above 100. Server permits 1000. A compatible UI fix existed only in backup commit 09245b8.",
+      "fix": "Restore validation to 1000 and fetch all bounded pages, with an empty-page guard."
+    },
+    {
+      "confirmed": true,
+      "problem": "CHAT_NOT_CONFIGURED despite an existing project .env",
+      "cause": "503 is emitted before storage when provider construction fails. Main loaded .env relative to process cwd. All required project-local credentials exist and validate; no deletion evidence. A new process loads them successfully. The failed earlier process environment/cwd was not captured, so its exact configuration omission cannot be proven.",
+      "fix": "Resolve default .env relative to project source root; retain explicit file paths and inherited-environment precedence; report configuration presence separately from HTTP liveness."
+    },
+    {
+      "confirmed": true,
+      "problem": "Pending save after configuration rejection",
+      "cause": "Chat rejects before storing a turn but the frontend retained a generic pending/save-uncertain label.",
+      "fix": "End pending state for known CHAT_NOT_CONFIGURED rejection; preserve normal retry and stored identities."
+    },
+    {
+      "confirmed": true,
+      "problem": "Historical price omitted in mixed recall and current comparison",
+      "cause": "isRecallAndVerifyRequest did not recognize What was the price we discussed; verified live in the clean candidate.",
+      "fix": "Extend only the explicit historical interrogative pattern; reuse existing historical Q&A formatter and comparison safeguards."
+    }
+  ],
+  "environment": {
+    "fileExists": true,
+    "fileIgnored": true,
+    "fileModifiedByRecovery": false,
+    "requiredFieldsPresent": true,
+    "configurationValidation": true,
+    "providerFactoriesReady": true,
+    "azureLiveConnected": true,
+    "tavilyLiveConnected": true,
+    "otherEnvFilesFound": false,
+    "trackedCredentialEnvFilesFound": false,
+    "variableRenamesFound": false,
+    "notes": "Only project and associated worktrees were searched. Current tool-process relevant variables were absent before explicit loading. Branch switching does not carry ignored local .env files into a different worktree."
+  },
+  "recovered": [
+    {
+      "source": "backup/primary-workspace-20261120 @ 09245b8",
+      "files": [
+        "public/app.js",
+        "public/styles.css",
+        "tests/ui.test.ts"
+      ],
+      "changes": "1000-conversation validation, refresh button styling, vertically stacked memory-status/composer, status-height observer."
+    }
+  ],
+  "retained": [
+    "Gate 2 memory and dates",
+    "Grounded recall safeguards from 980371b",
+    "Tool normalization from 56e96e5",
+    "Historical Q&A pairing from 9eae1b0",
+    "Five-vendor coverage from 73ccb78"
+  ],
+  "notRecovered": [
+    {
+      "source": "09245b8",
+      "reason": "Generated benchmark timing edits, obsolete diagnostic document and streaming-test whitespace changes do not repair runtime behavior; originals remain on backup."
+    },
+    {
+      "source": "dirty swarm worktrees",
+      "reason": "Older experimental agent/context/recall changes are superseded or incompatible with newer main code. In particular the recall experiment removes stronger main grounding checks. User changes remain untouched."
+    },
+    {
+      "source": "untracked Gate 3 live harnesses in test and detached main worktrees",
+      "reason": "Preserved in place. They are alternative QA harness work, not missing application implementations. Existing supported scripts and isolated probes were used."
+    }
+  ],
+  "tests": {
+    "node": "24.14.1",
+    "npm": "11.21.2",
+    "npmCi": "PASS: 109 packages, 0 audit vulnerabilities; sandbox attempt failed EPERM before permitted retry.",
+    "typecheck": "PASS server and browser",
+    "lint": "PASS: 0 hygiene errors",
+    "fullSuite": {
+      "pass": 982,
+      "skip": 1,
+      "fail": 0,
+      "files": 33,
+      "durationSeconds": 29.48
+    },
+    "initialSandboxSuite": {
+      "pass": 976,
+      "skip": 1,
+      "fail": 4,
+      "reason": "Four filesystem/HTTP timeouts; full permitted rerun passed without test timeout changes."
+    },
+    "offline": {
+      "pass": 31,
+      "cases": 31,
+      "usefulnessPass": 30,
+      "remaining": "C8 abstains on an untrusted synthetic domain."
+    },
+    "memory": {
+      "scriptTests": 39,
+      "grounded": 10,
+      "cases": 10,
+      "p50Ms": 3.8287,
+      "p95Ms": 75.8044,
+      "kind": "Synthetic frozen history, mocked model; separate 500-conversation scaling regression."
+    },
+    "tavilySmoke": {
+      "pass": true,
+      "basicRequests": 1,
+      "creditsReported": 1,
+      "elapsedMs": 2261
+    },
+    "liveRecall": {
+      "script": "npm run test:live -- --runs=1",
+      "exitCode": 1,
+      "modelPass": 2,
+      "recovered": 2,
+      "failedAnswers": 0,
+      "modelRequests": 8
+    },
+    "research": {
+      "modelRequests": 2,
+      "searchRequests": 1,
+      "sources": 3,
+      "elapsedMs": 4212,
+      "firstProgressMs": 80,
+      "deltas": 24
+    },
+    "clean": {
+      "kind": "Independent source snapshot copied from tracked candidate files; fresh npm install; no .env or node_modules copied.",
+      "npmInstall": true,
+      "independentTypecheck": true,
+      "independentLint": true,
+      "fullSuiteBeforeLastFix": {
+        "pass": 981,
+        "skip": 1,
+        "fail": 0
+      },
+      "finalFullSuite": {
+        "pass": 982,
+        "skip": 1,
+        "fail": 0,
+        "files": 33,
+        "durationSeconds": 34
+      },
+      "withoutCredentials": "health 200; chatConfigured false; chat 503 CHAT_NOT_CONFIGURED; create/list/reopen succeed; rejected message not persisted.",
+      "withCredentials": "Existing local credentials supplied only in child environment. Live normal chat and model-origin cross-conversation/date recall passed across owned-process restarts. Price omission found and corrected; exact live recheck passed."
+    },
+    "browser": {
+      "status": "BLOCKED",
+      "reason": "Computer Use could not confidently determine the current Chrome URL and stopped input."
+    },
+    "build": "No build script is defined or needed."
+  },
+  "remainingRisks": [
+    "Strict model-only live recall harness did not pass all pairs; safe deterministic fallback was used twice.",
+    "Manual Chrome visual/interaction check is blocked by Computer Use policy.",
+    "Exact environment/cwd of the original failing process was not captured.",
+    "One memory test remains intentionally skipped; one frozen usefulness case abstains."
+  ],
+  "secretProtection": {
+    "knownCredentialsFoundInGit": false,
+    "envNeverPrinted": true,
+    "envNeverCommitted": true,
+    "logsOrReportsContainKeys": false
+  },
+  "git": {
+    "noMerge": true,
+    "noPush": true,
+    "noBranchDeletion": true,
+    "userFrontendPreserved": true,
+    "otherDirtyWorktreesPreserved": true
+  },
+  "auditRefsCapturedBeforeRecoveryCommit": true,
+  "archivePreservation": {
+    "files": 110,
+    "changed": 0,
+    "missing": 0,
+    "verifiedBy": "SHA-256 content comparison before and after isolated verification"
+  }
+}

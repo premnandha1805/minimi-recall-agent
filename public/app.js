@@ -18,6 +18,7 @@ export { MAX_MESSAGE_CHARS };
  * @property {string} text
  * @property {string} timestamp
  * @property {string} [timezone]
+ * @property {boolean} [notSaved]
  */
 
 /**
@@ -614,7 +615,7 @@ export function createChatApp(options = {}) {
     }
     sessionListEl.replaceChildren();
     if (persistence) {
-      const refresh = el(doc, 'button', 'btn-primary-sm', 'Refresh conversations');
+      const refresh = el(doc, 'button', 'session-refresh-btn btn-secondary', 'Refresh conversations');
       refresh.addEventListener('click', () => { void refreshConversations(); }); sessionListEl.appendChild(refresh);
     }
 
@@ -681,7 +682,7 @@ export function createChatApp(options = {}) {
     const retained = el(doc, 'div', 'turn-retained');
     retained.appendChild(svgIcon(doc, 'M5 13L9 17L19 7', 13));
     retained.appendChild(el(doc, 'span', '', persistence ?
-      (memoryId(entry.id) ? 'Saved locally on this server' : 'Submission pending · local save not confirmed') :
+      (memoryId(entry.id) ? 'Saved locally on this server' : entry.notSaved ? 'Not saved · request rejected before persistence' : 'Submission pending · local save not confirmed') :
       'Browser session · server may still save submitted messages'));
     article.appendChild(retained);
 
@@ -864,7 +865,9 @@ export function createChatApp(options = {}) {
     const guarantee = el(doc, 'div', 'retained-guarantee');
     guarantee.appendChild(svgIcon(doc, 'M5 13L9 17L19 7', 14));
     guarantee.appendChild(
-      el(doc, 'span', '', 'Your message remains visible here and may already be saved locally on this server. Refresh conversations to check stored state.'),
+      el(doc, 'span', '', entry.telemetry.code === 'CHAT_NOT_CONFIGURED' ?
+        'This request was rejected before saving its message. Configure chat, restart the server, then retry.' :
+        'Your message remains visible here and may already be saved locally on this server. Refresh conversations to check stored state.'),
     );
     card.appendChild(guarantee);
 
@@ -1140,6 +1143,7 @@ export function createChatApp(options = {}) {
     const loadingEntry = targetSession.entries[loadingIndex];
     const userEntry = targetSession.entries[loadingIndex - 1];
     if (loadingEntry?.kind !== 'loading' || userEntry?.kind !== 'user') return;
+    userEntry.notSaved = false;
     const submission = submissions.get(userEntry.id) ?? { key: userEntry.id, attemptKey: generateId('attempt') };
     submissions.set(userEntry.id, submission);
     const requestToken = ++nextRequestToken;
@@ -1440,6 +1444,7 @@ export function createChatApp(options = {}) {
         void refreshHealth();
       }
     } else if (result.kind === 'http_error') {
+      if (result.code === 'CHAT_NOT_CONFIGURED' && !memoryId(userEntry.id)) userEntry.notSaved = true;
       const status = result.status ?? 500;
       const title =
         status === 400
@@ -1595,10 +1600,11 @@ export function createChatApp(options = {}) {
   async function refreshConversations() {
     const token = navigation;
     try {
-      for (const offset of [0, 50]) {
+      for (let offset = 0; offset < 1000; offset += 50) {
         const page = await stored(`/api/conversations?offset=${offset}&limit=50`);
-        if (!page || !Array.isArray(page.items) || page.items.length > 50 || !Number.isInteger(page.total) || page.total < 0 || page.total > 100 ||
+        if (!page || !Array.isArray(page.items) || page.items.length > 50 || !Number.isInteger(page.total) || page.total < 0 || page.total > 1000 ||
             !page.items.every((/** @type {any} */ v) => memoryId(v.id))) throw new Error('Invalid list');
+        if (page.items.length === 0 && offset < page.total) throw new Error('Incomplete list');
         if (token !== navigation || listenerController.signal.aborted) return;
         for (const item of page.items) if (!sessions.some((s) => s.id === item.id)) {
           sessions.push({ id: item.id, title: 'Stored conversation ? open to view', entries: [], history: [], omittedHistoryCount: 0 }); remoteSessions.add(item.id);
@@ -1763,7 +1769,7 @@ export function createChatApp(options = {}) {
       }
       if (connectionText) {
         const versionSuffix = health.version ? ` v${health.version}` : '';
-        connectionText.textContent = `Connected · API${versionSuffix}`;
+        connectionText.textContent = `Connected · API${versionSuffix}${health.chatConfigured === false ? ' · Chat not configured' : ''}`;
       }
       if (apiInfoMeta) {
         apiInfoMeta.replaceChildren(
@@ -1966,6 +1972,11 @@ export function createChatApp(options = {}) {
   syncTextareaHeight();
   renderWorkspace();
   composerForm?.before(memoryStatus);
+  if (typeof MutationObserver !== 'undefined') {
+    const memoryObserver = new MutationObserver(() => { syncComposerClearance(); });
+    memoryObserver.observe(memoryStatus, { childList: true, characterData: true, subtree: true });
+    listenerSignal.addEventListener('abort', () => memoryObserver.disconnect(), { once: true });
+  }
   const initialRestoration = persistence ? restoreConversations() : Promise.resolve();
   const initialHealthPromise = Promise.all([refreshHealth(), initialRestoration]).then(([health]) => health);
   win?.addEventListener('storage', (event) => { if (event.key === memoryKey && persistence) memoryStatus.textContent = 'Another tab changed the active conversation. Refresh conversations to view server state.'; }, { signal: listenerSignal });

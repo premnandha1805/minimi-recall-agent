@@ -83,6 +83,7 @@ export interface HealthResponse {
   service: string;
   version: string;
   timestamp: string;
+  chatConfigured: boolean;
 }
 
 export interface ValidationErrorDetail {

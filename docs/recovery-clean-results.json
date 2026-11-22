@@ -1,0 +1,56 @@
+{
+  "initialRun": {
+    "timestamp": "2026-11-22T05:22:16.765Z",
+    "rows": [
+      {
+        "name": "clean startup without env",
+        "status": "PASS"
+      },
+      {
+        "name": "clean startup with existing credentials supplied in memory",
+        "status": "PASS"
+      },
+      {
+        "name": "conversation survives process restart",
+        "status": "PASS"
+      },
+      {
+        "name": "clean live normal chat",
+        "status": "PASS",
+        "origin": "model"
+      },
+      {
+        "name": "accepted answer survives restart",
+        "status": "PASS"
+      },
+      {
+        "name": "live date and cross-conversation recall after restart",
+        "status": "PASS",
+        "origin": "model",
+        "fallback": false
+      },
+      {
+        "name": "live prior price plus current comparison with untrusted baseline",
+        "status": "FAIL",
+        "coverage": "complete",
+        "sourceCount": 6,
+        "noConfirmedChange": true
+      }
+    ]
+  },
+  "priceRecheck": {
+    "timestamp": "2026-11-22T05:25:18.314Z",
+    "rows": [
+      {
+        "name": "corrected clean candidate configured",
+        "status": "PASS"
+      },
+      {
+        "name": "historical price retained and current evidence compared honestly",
+        "status": "PASS",
+        "coverage": "complete",
+        "sourceCount": 6
+      }
+    ]
+  }
+}

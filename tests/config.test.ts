@@ -1,5 +1,33 @@
-import { describe, expect, it } from 'vitest';
-import { loadConfig } from '../src/config.js';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { loadConfig, loadEnvIfPresent, isChatConfigured } from '../src/config.js';
+import { azureEnv } from './fixtures/chat-stream.js';
+
+vi.mock('node:fs', () => ({ existsSync: vi.fn() }));
+afterEach(() => { vi.restoreAllMocks(); });
+
+describe('project environment discovery', () => {
+  it('loads the project .env when launched from another working directory', () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.spyOn(process, 'cwd').mockReturnValue(resolve(import.meta.dirname, '..', 'public'));
+    const load = vi.spyOn(process, 'loadEnvFile').mockImplementation(() => {});
+    loadEnvIfPresent();
+    expect(load).toHaveBeenCalledExactlyOnceWith(resolve(import.meta.dirname, '..', '.env'));
+  });
+  it('allows a clean clone without .env and retains explicit path support', () => {
+    const load = vi.spyOn(process, 'loadEnvFile').mockImplementation(() => {});
+    vi.mocked(existsSync).mockReturnValue(false);
+    loadEnvIfPresent(); expect(load).not.toHaveBeenCalled();
+    vi.mocked(existsSync).mockReturnValue(true);
+    loadEnvIfPresent('custom.env'); expect(load).toHaveBeenCalledWith(resolve('custom.env'));
+  });
+  it('reports configured chat only for the implemented adapter with both provider configurations', () => {
+    expect(isChatConfigured(loadConfig({}))).toBe(false);
+    expect(isChatConfigured(loadConfig(azureEnv))).toBe(true);
+    expect(isChatConfigured(loadConfig({ ...azureEnv, TAVILY_API_KEY: '' }))).toBe(false);
+  });
+});
 
 describe('loadConfig', () => {
   it('applies documented defaults when environment variables are omitted', () => {

@@ -43,6 +43,7 @@ const utf8Encoder = new TextEncoder();
 /**
  * @typedef {Object} HealthStatusResult
  * @property {boolean} ok
+ * @property {boolean} [chatConfigured]
  * @property {string} [service]
  * @property {string} [version]
  * @property {string} [timestamp]
@@ -266,7 +267,7 @@ export async function checkHealth(options = {}) {
         errorMessage: `Health check returned HTTP ${response.status}`,
       };
     }
-    const data = /** @type {{ status?: string, service?: string, version?: string, timestamp?: string }} */ (
+    const data = /** @type {{ status?: string, service?: string, version?: string, timestamp?: string, chatConfigured?: boolean }} */ (
       await response.json()
     );
     return {
@@ -274,6 +275,7 @@ export async function checkHealth(options = {}) {
       service: data?.service,
       version: data?.version,
       timestamp: data?.timestamp,
+      ...(typeof data?.chatConfigured === 'boolean' ? { chatConfigured: data.chatConfigured } : {}),
     };
   } catch (error) {
     return {
